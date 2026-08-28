@@ -1,5 +1,5 @@
 // ---------- API config ----------
-const API_URL = "http://localhost:3000";
+const API_URL = "https://wassel-backend-ds3n.onrender.com";
 
 const STATUS_LABELS = {
   nouvelle: "Nouvelle",
