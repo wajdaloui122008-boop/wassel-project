@@ -40,13 +40,13 @@ function signToken(user) {
 // POST /auth/register -> create a client or livreur account
 app.post("/auth/register", async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, country, phone } = req.body;
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: "name, email, password et role sont requis" });
     }
-    if (!["client", "livreur"].includes(role)) {
-      return res.status(400).json({ error: "role doit être 'client' ou 'livreur'" });
+    if (!["client", "livreur", "taxi"].includes(role)) {
+      return res.status(400).json({ error: "role doit être 'client', 'livreur' ou 'taxi'" });
     }
 
     const existing = await User.findOne({ email: email.toLowerCase() });
@@ -55,7 +55,14 @@ app.post("/auth/register", async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email, password: hashed, role });
+    const user = await User.create({
+      name,
+      email,
+      password: hashed,
+      role,
+      country: country || "TN",
+      phone: phone || "",
+    });
 
     const token = signToken(user);
     res.status(201).json({ token, user });
@@ -106,8 +113,11 @@ app.get("/orders", requireAuth, async (req, res) => {
     let filter;
     if (req.user.role === "client") {
       filter = { client: req.user.id };
-    } else {
+    } else if (req.user.role === "livreur") {
       filter = { $or: [{ status: "nouvelle" }, { livreur: req.user.id }] };
+    } else {
+      // taxi accounts: ride-hailing isn't built yet, no parcel orders to show
+      return res.json([]);
     }
     const orders = await Order.find(filter).sort({ createdAt: -1 });
     res.json(orders);
@@ -119,12 +129,18 @@ app.get("/orders", requireAuth, async (req, res) => {
 // POST /orders -> a client creates a new order
 app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
   try {
-    const { pickup, dropoff, pkg } = req.body;
+    const { pickup, dropoff, pkg, paymentMethod } = req.body;
     if (!pickup || !dropoff || !pkg) {
       return res.status(400).json({ error: "pickup, dropoff et pkg sont requis" });
     }
 
-    const order = await Order.create({ pickup, dropoff, pkg, client: req.user.id });
+    const order = await Order.create({
+      pickup,
+      dropoff,
+      pkg,
+      client: req.user.id,
+      paymentMethod: paymentMethod || "especes",
+    });
     res.status(201).json(order);
   } catch (err) {
     res.status(500).json({ error: "Erreur serveur" });

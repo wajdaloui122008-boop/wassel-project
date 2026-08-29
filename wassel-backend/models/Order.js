@@ -13,6 +13,8 @@ const orderSchema = new mongoose.Schema({
   },
   client: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   livreur: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  paymentMethod: { type: String, enum: ["especes", "carte", "wallet"], default: "especes" },
+  fee: { type: Number, default: 8 }, // flat placeholder fee in DT until real pricing is built
   createdAt: { type: Date, default: Date.now },
 });
 

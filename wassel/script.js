@@ -15,9 +15,78 @@ const STATUS_PROGRESS = {
   livree: 100,
 };
 
+// Platform commission taken from the livreur's delivery fee.
+// Kept lower than the 20-30% typical of established delivery apps
+// to make Velto more attractive to early livreurs.
+const COMMISSION_RATE = 0.15;
+
+const COUNTRIES = [
+  { code: "TN", flag: "🇹🇳", name: "Tunisie" },
+  { code: "DZ", flag: "🇩🇿", name: "Algérie" },
+  { code: "MA", flag: "🇲🇦", name: "Maroc" },
+  { code: "FR", flag: "🇫🇷", name: "France" },
+  { code: "DE", flag: "🇩🇪", name: "Allemagne" },
+  { code: "BE", flag: "🇧🇪", name: "Belgique" },
+  { code: "CA", flag: "🇨🇦", name: "Canada" },
+  { code: "AE", flag: "🇦🇪", name: "Émirats" },
+];
+
 let orders = [];
 let currentUser = null; // { id, role, name }
-let authToken = localStorage.getItem("wassel_token") || null;
+let authToken = localStorage.getItem("velto_token") || null;
+let selectedCountry = "TN";
+let selectedRole = null;
+let selectedPayment = "especes";
+
+// ---------- Onboarding: country + role pickers ----------
+const countryGrid = document.getElementById("country-grid");
+COUNTRIES.forEach((c, i) => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "chip" + (i === 0 ? " selected" : "");
+  btn.dataset.country = c.code;
+  btn.innerHTML = `${c.flag} ${c.name}`;
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#country-grid .chip").forEach((el) => el.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedCountry = c.code;
+  });
+  countryGrid.appendChild(btn);
+});
+
+document.querySelectorAll(".role-card").forEach((card) => {
+  card.addEventListener("click", () => {
+    document.querySelectorAll(".role-card").forEach((c) => c.classList.remove("selected"));
+    card.classList.add("selected");
+    selectedRole = card.dataset.role;
+  });
+});
+
+// ---------- OAuth stubs (honest placeholder — no real provider wired up) ----------
+document.querySelectorAll(".btn-oauth").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    alert(`La connexion avec ${btn.dataset.provider} arrive bientôt. Utilisez l'email pour l'instant.`);
+  });
+});
+
+// ---------- Payment method toggle ----------
+document.querySelectorAll(".payment-option").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".payment-option").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    selectedPayment = btn.dataset.payment;
+  });
+});
+
+// ---------- Category tabs (client home) ----------
+document.querySelectorAll(".category-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".category-tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    document.querySelectorAll(".category-panel").forEach((p) => p.classList.add("hidden"));
+    document.getElementById(`category-${tab.dataset.category}`).classList.remove("hidden");
+  });
+});
 
 // ---------- Auth helpers ----------
 function authHeaders() {
@@ -33,7 +102,7 @@ async function tryRestoreSession() {
     const data = await res.json();
     onLoggedIn(data.user, authToken);
   } catch (err) {
-    localStorage.removeItem("wassel_token");
+    localStorage.removeItem("velto_token");
     authToken = null;
     showAuthView();
   }
@@ -42,10 +111,11 @@ async function tryRestoreSession() {
 function onLoggedIn(user, token) {
   currentUser = user;
   authToken = token;
-  localStorage.setItem("wassel_token", token);
+  localStorage.setItem("velto_token", token);
 
   document.getElementById("topbar-user").classList.remove("hidden");
-  document.getElementById("user-name").textContent = `${user.name} (${user.role === "client" ? "Client" : "Livreur"})`;
+  const roleLabel = { client: "Client", livreur: "Livreur", taxi: "Taxi" }[user.role] || user.role;
+  document.getElementById("user-name").textContent = `${user.name} (${roleLabel})`;
 
   views.forEach((v) => v.classList.remove("active"));
   document.getElementById(`view-${user.role}`).classList.add("active");
@@ -55,7 +125,7 @@ function onLoggedIn(user, token) {
 }
 
 function logout() {
-  localStorage.removeItem("wassel_token");
+  localStorage.removeItem("velto_token");
   authToken = null;
   currentUser = null;
   document.getElementById("topbar-user").classList.add("hidden");
@@ -118,16 +188,28 @@ registerForm.addEventListener("submit", async (e) => {
   const errorEl = document.getElementById("register-error");
   errorEl.textContent = "";
 
+  if (!selectedRole) {
+    errorEl.textContent = "Choisissez si vous êtes client, livreur ou chauffeur taxi.";
+    return;
+  }
+
   const name = document.getElementById("register-name").value.trim();
   const email = document.getElementById("register-email").value.trim();
+  const phone = document.getElementById("register-phone").value.trim();
   const password = document.getElementById("register-password").value;
-  const role = document.getElementById("register-role").value;
 
   try {
     const res = await fetch(`${API_URL}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password, role }),
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+        role: selectedRole,
+        country: selectedCountry,
+        phone,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Échec de la création du compte");
@@ -140,7 +222,7 @@ registerForm.addEventListener("submit", async (e) => {
 
 // ---------- Orders API ----------
 async function fetchOrders() {
-  if (!authToken) return;
+  if (!authToken || currentUser?.role === "taxi") return;
   try {
     const res = await fetch(`${API_URL}/orders`, { headers: authHeaders() });
     if (res.status === 401) return logout();
@@ -156,7 +238,7 @@ async function createOrder(pickup, dropoff, pkg) {
     const res = await fetch(`${API_URL}/orders`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ pickup, dropoff, pkg }),
+      body: JSON.stringify({ pickup, dropoff, pkg, paymentMethod: selectedPayment }),
     });
     if (!res.ok) throw new Error("Échec de la création de la commande");
     await fetchOrders();
@@ -200,12 +282,13 @@ orderForm.addEventListener("submit", (e) => {
 
 // ---------- Card rendering ----------
 const template = document.getElementById("order-card-template");
+const PAYMENT_LABELS = { especes: "Espèces", carte: "Carte", wallet: "Wallet" };
 
-function buildCard(order, actions) {
+function buildCard(order, actions, { showEarnings } = {}) {
   const node = template.content.cloneNode(true);
   const card = node.querySelector(".order-card");
 
-  card.querySelector(".order-id").textContent = `Commande #${order.id.slice(-5)}`;
+  card.querySelector(".order-id").textContent = `#${order.id.slice(-5)}`;
 
   const statusEl = card.querySelector(".order-status");
   statusEl.textContent = STATUS_LABELS[order.status];
@@ -221,6 +304,16 @@ function buildCard(order, actions) {
 
   card.querySelector(".package-desc").textContent = `📦 ${order.pkg}`;
 
+  const fee = order.fee ?? 8;
+  const paymentLabel = PAYMENT_LABELS[order.paymentMethod] || "Espèces";
+  const feeLine = card.querySelector(".fee-line");
+  if (showEarnings) {
+    const earnings = (fee * (1 - COMMISSION_RATE)).toFixed(2);
+    feeLine.textContent = `Frais: ${fee.toFixed(2)} DT · Vous recevez: ${earnings} DT (commission Velto 15%) · ${paymentLabel}`;
+  } else {
+    feeLine.textContent = `Frais de livraison: ${fee.toFixed(2)} DT · ${paymentLabel}`;
+  }
+
   const actionsEl = card.querySelector(".order-actions");
   actions.forEach(({ label, accent, onClick }) => {
     const btn = document.createElement("button");
@@ -233,7 +326,7 @@ function buildCard(order, actions) {
   return node;
 }
 
-function renderList(containerId, list, emptyMessage, actionsFor) {
+function renderList(containerId, list, emptyMessage, actionsFor, opts) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
 
@@ -246,7 +339,7 @@ function renderList(containerId, list, emptyMessage, actionsFor) {
   }
 
   list.forEach((order) => {
-    container.appendChild(buildCard(order, actionsFor(order)));
+    container.appendChild(buildCard(order, actionsFor(order), opts));
   });
 }
 
@@ -271,7 +364,8 @@ function renderLivreurViews() {
         accent: true,
         onClick: () => updateOrderStatus(order.id, "acceptee"),
       },
-    ]
+    ],
+    { showEarnings: true }
   );
 
   const mine = orders.filter(
@@ -301,14 +395,15 @@ function renderLivreurViews() {
         ];
       }
       return [];
-    }
+    },
+    { showEarnings: true }
   );
 }
 
 function renderAll() {
   if (!currentUser) return;
   if (currentUser.role === "client") renderClientOrders();
-  else renderLivreurViews();
+  else if (currentUser.role === "livreur") renderLivreurViews();
 }
 
 // ---------- Init ----------
