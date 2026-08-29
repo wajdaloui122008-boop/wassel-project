@@ -284,9 +284,10 @@ orderForm.addEventListener("submit", (e) => {
 const template = document.getElementById("order-card-template");
 const PAYMENT_LABELS = { especes: "Espèces", carte: "Carte", wallet: "Wallet" };
 
-function buildCard(order, actions, { showEarnings } = {}) {
+function buildCard(order, actions, index, { showEarnings } = {}) {
   const node = template.content.cloneNode(true);
   const card = node.querySelector(".order-card");
+  card.style.setProperty("--i", index); // staggered entrance animation delay
 
   card.querySelector(".order-id").textContent = `#${order.id.slice(-5)}`;
 
@@ -338,8 +339,8 @@ function renderList(containerId, list, emptyMessage, actionsFor, opts) {
     return;
   }
 
-  list.forEach((order) => {
-    container.appendChild(buildCard(order, actionsFor(order), opts));
+  list.forEach((order, index) => {
+    container.appendChild(buildCard(order, actionsFor(order), index, opts));
   });
 }
 
