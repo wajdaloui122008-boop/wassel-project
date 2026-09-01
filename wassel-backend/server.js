@@ -28,11 +28,40 @@ const BASE_FEE = Number(process.env.BASE_FEE_TND || 3);
 const PRICE_PER_KM = Number(process.env.PRICE_PER_KM_TND || 0.8);
 const MIN_FEE = Number(process.env.MIN_FEE_TND || 5);
 const COMMISSION_RATE = Number(process.env.COMMISSION_RATE || 0.15);
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 20;
+const authAttempts = new Map();
+let dbReady = false;
 
+mongoose.connection.on("connected", () => { dbReady = true; console.log("Connecté à MongoDB"); });
+mongoose.connection.on("disconnected", () => { dbReady = false; console.error("MongoDB déconnecté"); });
 mongoose
   .connect(MONGODB_URI)
-  .then(() => console.log("Connecté à MongoDB"))
   .catch((err) => console.error("Erreur de connexion à MongoDB:", err.message));
+
+function authRateLimit(req, res, next) {
+  const key = `${req.ip || "unknown"}:${cleanString(req.body?.email, 160).toLowerCase() || "no-email"}`;
+  const now = Date.now();
+  const previous = authAttempts.get(key);
+  if (!previous || now - previous.startedAt >= AUTH_WINDOW_MS) {
+    authAttempts.set(key, { startedAt: now, count: 1 });
+    return next();
+  }
+  previous.count += 1;
+  if (previous.count > AUTH_MAX_ATTEMPTS) {
+    const retryAfter = Math.ceil((AUTH_WINDOW_MS - (now - previous.startedAt)) / 1000);
+    res.set("Retry-After", String(retryAfter));
+    return res.status(429).json({ error: "Trop de tentatives. Réessayez plus tard." });
+  }
+  return next();
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - AUTH_WINDOW_MS;
+  for (const [key, value] of authAttempts) {
+    if (value.startedAt < cutoff) authAttempts.delete(key);
+  }
+}, AUTH_WINDOW_MS).unref();
 
 const VALID_TRANSITIONS = {
   nouvelle: ["acceptee", "annulee"],
@@ -75,9 +104,12 @@ function calculatePricing(distanceKm) {
   return { fee: roundedFee, commission, driverEarnings: Math.round((roundedFee - commission) * 10) / 10 };
 }
 
-app.get("/health", (req, res) => res.json({ ok: true, service: "wassel-backend" }));
+app.get("/health", (req, res) => {
+  const payload = { ok: dbReady, service: "wassel-backend", database: dbReady ? "connected" : "disconnected" };
+  res.status(dbReady ? 200 : 503).json(payload);
+});
 
-app.post("/auth/register", async (req, res) => {
+app.post("/auth/register", authRateLimit, async (req, res) => {
   try {
     const name = cleanString(req.body.name, 80);
     const email = cleanString(req.body.email, 160).toLowerCase();
@@ -101,7 +133,7 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-app.post("/auth/login", async (req, res) => {
+app.post("/auth/login", authRateLimit, async (req, res) => {
   try {
     const email = cleanString(req.body.email, 160).toLowerCase();
     const password = typeof req.body.password === "string" ? req.body.password : "";
@@ -133,10 +165,11 @@ app.patch("/drivers/me/location", requireAuth, requireRole("livreur"), async (re
   res.json({ location: user.location });
 });
 
-app.get("/drivers/nearby", requireAuth, async (req, res) => {
+app.get("/drivers/nearby", requireAuth, requireRole("client"), async (req, res) => {
   if (!validCoordinatePair(req.query)) return res.status(400).json({ error: "Coordonnées GPS invalides" });
   const lat = Number(req.query.lat), lng = Number(req.query.lng), radiusKm = Math.min(Math.max(Number(req.query.radiusKm || 10), 1), 50);
-  const drivers = await User.find({ role: "livreur", isOnline: true, isAvailable: true, "location.lat": { $exists: true }, "location.lng": { $exists: true } }).select("name phone location isOnline isAvailable");
+  const staleCutoff = new Date(Date.now() - 2 * 60 * 1000);
+  const drivers = await User.find({ role: "livreur", isOnline: true, isAvailable: true, "location.lat": { $exists: true }, "location.lng": { $exists: true }, "location.updatedAt": { $gte: staleCutoff } }).select("name location isOnline isAvailable");
   const result = drivers.map((d) => ({ user: d, distanceKm: haversineKm({ lat, lng }, d.location) })).filter((d) => d.distanceKm <= radiusKm).sort((a, b) => a.distanceKm - b.distanceKm);
   res.json(result);
 });
