@@ -128,7 +128,7 @@ app.patch("/drivers/me/status", requireAuth, requireRole("livreur"), async (req,
 app.patch("/drivers/me/location", requireAuth, requireRole("livreur"), async (req, res) => {
   if (!validCoordinatePair(req.body)) return res.status(400).json({ error: "Coordonnées GPS invalides" });
   const location = { lat: Number(req.body.lat), lng: Number(req.body.lng), updatedAt: new Date() };
-  const user = await User.findByIdAndUpdate(req.user.id, { $set: { location, isOnline: true } }, { new: true, runValidators: true });
+  const user = await User.findByIdAndUpdate(req.user.id, { $set: { location } }, { new: true, runValidators: true });
   if (!user) return res.status(404).json({ error: "Livreur introuvable" });
   res.json({ location: user.location });
 });
