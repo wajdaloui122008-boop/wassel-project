@@ -1,6 +1,7 @@
 (() => {
   const API = "https://wassel-backend-ds3n.onrender.com";
   const STATUS = { nouvelle: "Nouvelle", acceptee: "Acceptée", route: "En route", livree: "Livrée", annulee: "Annulée" };
+  const ORDER_FLOW = ["nouvelle", "acceptee", "route", "livree"];
   let user = null;
   let token = localStorage.getItem("velto_token") || null;
   let map = null;
@@ -34,18 +35,27 @@
     if (user?.role !== "client" || document.getElementById("velto-live-tracking")) return;
     const host = document.querySelector("#view-client .orders-panel"); if (!host) return;
     const panel = document.createElement("div"); panel.id = "velto-live-tracking"; panel.style.cssText = "margin-top:18px;padding-top:18px;border-top:1px solid rgba(36,28,16,.1)";
-    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h3 style="margin:0">Suivi en direct</h3><p id="velto-track-driver" style="margin:5px 0;color:#857a67;font-size:13px">Aucune course active.</p></div><span id="velto-track-status" class="order-status">—</span></div><div id="velto-track-map" style="height:230px;border-radius:16px;overflow:hidden;margin-top:12px"></div>`;
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h3 style="margin:0">Suivi en direct</h3><p id="velto-track-driver" style="margin:5px 0;color:#857a67;font-size:13px">Aucune course active.</p></div><span id="velto-track-status" class="order-status">—</span></div><div id="velto-track-progress" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px"></div><div id="velto-track-meta" style="margin-top:10px;color:#857a67;font-size:13px"></div><div id="velto-track-map" style="height:230px;border-radius:16px;overflow:hidden;margin-top:12px"></div>`;
     host.appendChild(panel);
     loadLeaflet().then(() => { if (map || !document.getElementById("velto-track-map")) return; map = L.map("velto-track-map").setView([36.8065, 10.1815], 12); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors" }).addTo(map); }).catch(() => {});
+  }
+  function renderProgress(status) {
+    const el = document.getElementById("velto-track-progress"); if (!el) return;
+    if (status === "annulee") { el.innerHTML = `<div style="grid-column:1/-1;padding:10px;border-radius:12px;background:#f6eeee;font-weight:700">❌ Commande annulée</div>`; return; }
+    const index = ORDER_FLOW.indexOf(status);
+    el.innerHTML = ORDER_FLOW.map((key, i) => `<div style="padding:9px 4px;text-align:center;border-radius:10px;background:${i <= index ? "#211d18" : "#eee"};color:${i <= index ? "#fff" : "#857a67"};font-size:11px;font-weight:700">${i < index ? "✓ " : ""}${STATUS[key]}</div>`).join("");
   }
   async function refreshClient(orders) {
     ensureClientPanel();
     const active = orders.find(o => ["nouvelle", "acceptee", "route"].includes(o.status));
-    const statusEl = document.getElementById("velto-track-status"), driverEl = document.getElementById("velto-track-driver");
-    if (!active) { if (statusEl) statusEl.textContent = "—"; if (driverEl) driverEl.textContent = "Aucune course active."; if (marker && map) { map.removeLayer(marker); marker = null; } return; }
+    const statusEl = document.getElementById("velto-track-status"), driverEl = document.getElementById("velto-track-driver"), metaEl = document.getElementById("velto-track-meta");
+    if (!active) { if (statusEl) statusEl.textContent = "—"; if (driverEl) driverEl.textContent = "Aucune course active."; if (metaEl) metaEl.textContent = ""; renderProgress("nouvelle"); if (marker && map) { map.removeLayer(marker); marker = null; } return; }
     try {
       const res = await fetch(`${API}/orders/${active.id}/tracking`, { headers: headers() }); if (!res.ok) return; const data = await res.json(); const label = STATUS[data.status] || data.status;
-      if (statusEl) statusEl.textContent = label; if (driverEl) driverEl.textContent = data.driver ? `Livreur : ${data.driver.name}${data.driver.location ? " · GPS actif" : ""}` : "En attente d'un livreur";
+      if (statusEl) statusEl.textContent = label;
+      if (driverEl) driverEl.textContent = data.driver ? `Livreur : ${data.driver.name}${data.driver.location ? " · GPS actif" : ""}` : "En attente d'un livreur";
+      if (metaEl) { const bits = []; if (Number.isFinite(Number(data.distanceKm))) bits.push(`Distance : ${Number(data.distanceKm).toFixed(1)} km`); if (Number.isFinite(Number(data.estimatedDurationMin))) bits.push(`Durée estimée : ${Math.max(1, Math.round(Number(data.estimatedDurationMin)))} min`); metaEl.textContent = bits.join(" · "); }
+      renderProgress(data.status);
       const previous = lastStatuses.get(active.id);
       if (previous && previous !== data.status) { const msg = `Commande #${String(active.id).slice(-5)} : ${label}`; toast(msg, data.status === "livree"); nativeNotify("Velto", msg); }
       lastStatuses.set(active.id, data.status);
