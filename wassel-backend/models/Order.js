@@ -24,6 +24,8 @@ const orderSchema = new mongoose.Schema({
   client: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   livreur: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   paymentMethod: { type: String, enum: ["especes", "carte", "wallet"], default: "especes" },
+  paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
+  transactionId: { type: String, trim: true, maxlength: 200, default: "" },
   fee: { type: Number, required: true, min: 0 },
   commission: { type: Number, required: true, min: 0 },
   driverEarnings: { type: Number, required: true, min: 0 },
