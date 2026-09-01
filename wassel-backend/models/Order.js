@@ -2,10 +2,22 @@ const mongoose = require("mongoose");
 
 const VALID_STATUSES = ["nouvelle", "acceptee", "route", "livree"];
 
+const locationSchema = new mongoose.Schema(
+  {
+    lat: { type: Number, required: true, min: -90, max: 90 },
+    lng: { type: Number, required: true, min: -180, max: 180 },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema({
-  pickup: { type: String, required: true },
-  dropoff: { type: String, required: true },
-  pkg: { type: String, required: true },
+  pickup: { type: String, required: true, trim: true, maxlength: 250 },
+  dropoff: { type: String, required: true, trim: true, maxlength: 250 },
+  pickupLocation: { type: locationSchema },
+  dropoffLocation: { type: locationSchema },
+  distanceKm: { type: Number, min: 0, default: null },
+  estimatedDurationMin: { type: Number, min: 0, default: null },
+  pkg: { type: String, required: true, trim: true, maxlength: 500 },
   status: {
     type: String,
     enum: VALID_STATUSES,
@@ -14,12 +26,12 @@ const orderSchema = new mongoose.Schema({
   client: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   livreur: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   paymentMethod: { type: String, enum: ["especes", "carte", "wallet"], default: "especes" },
-  fee: { type: Number, default: 8 }, // flat placeholder fee in DT until real pricing is built
+  fee: { type: Number, required: true, min: 0 },
+  commission: { type: Number, required: true, min: 0 },
+  driverEarnings: { type: Number, required: true, min: 0 },
   createdAt: { type: Date, default: Date.now },
 });
 
-// Expose a clean "id" field (string) instead of Mongo's "_id" / "__v",
-// so the frontend can keep using order.id like before.
 orderSchema.set("toJSON", {
   virtuals: true,
   transform: (doc, ret) => {

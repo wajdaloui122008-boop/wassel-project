@@ -14,6 +14,10 @@ app.use(cors());
 app.use(express.json({ limit: "32kb" }));
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/wassel";
+const BASE_FEE = Number(process.env.BASE_FEE_TND || 3);
+const PRICE_PER_KM = Number(process.env.PRICE_PER_KM_TND || 0.8);
+const MIN_FEE = Number(process.env.MIN_FEE_TND || 5);
+const COMMISSION_RATE = Number(process.env.COMMISSION_RATE || 0.15);
 
 mongoose
   .connect(MONGODB_URI)
@@ -26,7 +30,6 @@ const VALID_TRANSITIONS = {
   route: ["livree"],
   livree: [],
 };
-
 const VALID_ROLES = ["client", "livreur", "taxi"];
 const VALID_PAYMENT_METHODS = ["especes", "carte", "wallet"];
 
@@ -37,17 +40,31 @@ function signToken(user) {
     { expiresIn: "7d" }
   );
 }
-
 function cleanString(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
+function validCoordinatePair(value) {
+  return value && Number.isFinite(Number(value.lat)) && Number.isFinite(Number(value.lng)) &&
+    Number(value.lat) >= -90 && Number(value.lat) <= 90 && Number(value.lng) >= -180 && Number(value.lng) <= 180;
+}
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function calculatePricing(distanceKm) {
+  const fee = Math.max(MIN_FEE, BASE_FEE + distanceKm * PRICE_PER_KM);
+  const roundedFee = Math.round(fee * 10) / 10;
+  const commission = Math.round(roundedFee * COMMISSION_RATE * 10) / 10;
+  return { fee: roundedFee, commission, driverEarnings: Math.round((roundedFee - commission) * 10) / 10 };
+}
 
-// ================= HEALTH =================
-app.get("/health", (req, res) => {
-  res.json({ ok: true, service: "wassel-backend" });
-});
+app.get("/health", (req, res) => res.json({ ok: true, service: "wassel-backend" }));
 
-// ================= AUTH =================
 app.post("/auth/register", async (req, res) => {
   try {
     const name = cleanString(req.body.name, 80);
@@ -56,39 +73,19 @@ app.post("/auth/register", async (req, res) => {
     const role = cleanString(req.body.role, 20);
     const country = cleanString(req.body.country, 2).toUpperCase() || "TN";
     const phone = cleanString(req.body.phone, 30);
-
-    if (!name || !email || !password || !role) {
-      return res.status(400).json({ error: "name, email, password et role sont requis" });
-    }
-    if (name.length < 2) {
-      return res.status(400).json({ error: "Le nom est trop court" });
-    }
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ error: "Email invalide" });
-    }
-    if (password.length < 6 || password.length > 128) {
-      return res.status(400).json({ error: "Le mot de passe doit contenir entre 6 et 128 caractères" });
-    }
-    if (!VALID_ROLES.includes(role)) {
-      return res.status(400).json({ error: "role doit être 'client', 'livreur' ou 'taxi'" });
-    }
-
+    if (!name || !email || !password || !role) return res.status(400).json({ error: "name, email, password et role sont requis" });
+    if (name.length < 2) return res.status(400).json({ error: "Le nom est trop court" });
+    if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: "Email invalide" });
+    if (password.length < 6 || password.length > 128) return res.status(400).json({ error: "Le mot de passe doit contenir entre 6 et 128 caractères" });
+    if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: "role doit être 'client', 'livreur' ou 'taxi'" });
     const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(409).json({ error: "Un compte existe déjà avec cet email" });
-    }
-
+    if (existing) return res.status(409).json({ error: "Un compte existe déjà avec cet email" });
     const hashed = await bcrypt.hash(password, 12);
     const user = await User.create({ name, email, password: hashed, role, country, phone });
-    const token = signToken(user);
-
-    res.status(201).json({ token, user });
+    res.status(201).json({ token: signToken(user), user });
   } catch (err) {
-    if (err?.code === 11000) {
-      return res.status(409).json({ error: "Un compte existe déjà avec cet email" });
-    }
-    console.error("Register error:", err);
-    res.status(500).json({ error: "Erreur serveur" });
+    if (err?.code === 11000) return res.status(409).json({ error: "Un compte existe déjà avec cet email" });
+    console.error("Register error:", err); res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
@@ -96,132 +93,101 @@ app.post("/auth/login", async (req, res) => {
   try {
     const email = cleanString(req.body.email, 160).toLowerCase();
     const password = typeof req.body.password === "string" ? req.body.password : "";
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "email et password sont requis" });
-    }
-
+    if (!email || !password) return res.status(400).json({ error: "email et password sont requis" });
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ error: "Email ou mot de passe incorrect" });
-    }
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.status(401).json({ error: "Email ou mot de passe incorrect" });
-    }
-
+    if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     res.json({ token: signToken(user), user });
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err) { console.error("Login error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 app.get("/auth/me", requireAuth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ error: "Utilisateur introuvable" });
-    res.json({ user });
-  } catch (err) {
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  try { const user = await User.findById(req.user.id); if (!user) return res.status(404).json({ error: "Utilisateur introuvable" }); res.json({ user }); }
+  catch (err) { res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+// ================= DRIVER LOCATION / AVAILABILITY =================
+app.patch("/drivers/me/status", requireAuth, requireRole("livreur"), async (req, res) => {
+  const isOnline = Boolean(req.body.isOnline);
+  const isAvailable = isOnline ? Boolean(req.body.isAvailable) : false;
+  const user = await User.findByIdAndUpdate(req.user.id, { $set: { isOnline, isAvailable } }, { new: true, runValidators: true });
+  if (!user) return res.status(404).json({ error: "Livreur introuvable" });
+  res.json({ user });
+});
+
+app.patch("/drivers/me/location", requireAuth, requireRole("livreur"), async (req, res) => {
+  if (!validCoordinatePair(req.body)) return res.status(400).json({ error: "Coordonnées GPS invalides" });
+  const location = { lat: Number(req.body.lat), lng: Number(req.body.lng), updatedAt: new Date() };
+  const user = await User.findByIdAndUpdate(req.user.id, { $set: { location, isOnline: true } }, { new: true, runValidators: true });
+  if (!user) return res.status(404).json({ error: "Livreur introuvable" });
+  res.json({ location: user.location });
+});
+
+app.get("/drivers/nearby", requireAuth, async (req, res) => {
+  if (!validCoordinatePair(req.query)) return res.status(400).json({ error: "Coordonnées GPS invalides" });
+  const lat = Number(req.query.lat), lng = Number(req.query.lng), radiusKm = Math.min(Math.max(Number(req.query.radiusKm || 10), 1), 50);
+  const drivers = await User.find({ role: "livreur", isOnline: true, isAvailable: true, "location.lat": { $exists: true }, "location.lng": { $exists: true } }).select("name phone location isOnline isAvailable");
+  const result = drivers.map((d) => ({ user: d, distanceKm: haversineKm({ lat, lng }, d.location) })).filter((d) => d.distanceKm <= radiusKm).sort((a, b) => a.distanceKm - b.distanceKm);
+  res.json(result);
 });
 
 // ================= ORDERS =================
 app.get("/orders", requireAuth, async (req, res) => {
   try {
     let filter;
-    if (req.user.role === "client") {
-      filter = { client: req.user.id };
-    } else if (req.user.role === "livreur") {
-      filter = { $or: [{ status: "nouvelle" }, { livreur: req.user.id }] };
-    } else {
-      return res.json([]);
-    }
-
-    const orders = await Order.find(filter).sort({ createdAt: -1 });
-    res.json(orders);
-  } catch (err) {
-    console.error("Get orders error:", err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+    if (req.user.role === "client") filter = { client: req.user.id };
+    else if (req.user.role === "livreur") filter = { $or: [{ status: "nouvelle" }, { livreur: req.user.id }] };
+    else if (req.user.role === "admin") filter = {};
+    else return res.json([]);
+    res.json(await Order.find(filter).sort({ createdAt: -1 }));
+  } catch (err) { console.error("Get orders error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
   try {
-    const pickup = cleanString(req.body.pickup, 250);
-    const dropoff = cleanString(req.body.dropoff, 250);
-    const pkg = cleanString(req.body.pkg, 500);
+    const pickup = cleanString(req.body.pickup, 250), dropoff = cleanString(req.body.dropoff, 250), pkg = cleanString(req.body.pkg, 500);
     const paymentMethod = cleanString(req.body.paymentMethod, 20) || "especes";
-
-    if (!pickup || !dropoff || !pkg) {
-      return res.status(400).json({ error: "pickup, dropoff et pkg sont requis" });
-    }
-    if (!VALID_PAYMENT_METHODS.includes(paymentMethod)) {
-      return res.status(400).json({ error: "Méthode de paiement invalide" });
-    }
-
-    const order = await Order.create({
-      pickup,
-      dropoff,
-      pkg,
-      client: req.user.id,
-      paymentMethod,
-    });
-
+    if (!pickup || !dropoff || !pkg) return res.status(400).json({ error: "pickup, dropoff et pkg sont requis" });
+    if (!VALID_PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: "Méthode de paiement invalide" });
+    if (!validCoordinatePair(req.body.pickupLocation) || !validCoordinatePair(req.body.dropoffLocation)) return res.status(400).json({ error: "Les positions pickup et dropoff sont requises" });
+    const pickupLocation = { lat: Number(req.body.pickupLocation.lat), lng: Number(req.body.pickupLocation.lng) };
+    const dropoffLocation = { lat: Number(req.body.dropoffLocation.lat), lng: Number(req.body.dropoffLocation.lng) };
+    const distanceKm = Math.round(haversineKm(pickupLocation, dropoffLocation) * 100) / 100;
+    const pricing = calculatePricing(distanceKm);
+    const order = await Order.create({ pickup, dropoff, pickupLocation, dropoffLocation, distanceKm, pkg, client: req.user.id, paymentMethod, ...pricing });
     res.status(201).json(order);
-  } catch (err) {
-    console.error("Create order error:", err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err) { console.error("Create order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
-// Atomic status update prevents two livreurs from accepting the same order.
 app.patch("/orders/:id/status", requireAuth, requireRole("livreur"), async (req, res) => {
   try {
     const { status } = req.body;
-
-    if (!Object.prototype.hasOwnProperty.call(VALID_TRANSITIONS, status) && status !== "acceptee") {
-      return res.status(400).json({ error: "Statut invalide" });
-    }
-
+    if (!Object.prototype.hasOwnProperty.call(VALID_TRANSITIONS, status) && status !== "acceptee") return res.status(400).json({ error: "Statut invalide" });
     if (status === "acceptee") {
-      const order = await Order.findOneAndUpdate(
-        { _id: req.params.id, status: "nouvelle", livreur: null },
-        { $set: { status: "acceptee", livreur: req.user.id } },
-        { new: true, runValidators: true }
-      );
-
-      if (!order) {
-        return res.status(409).json({ error: "Commande déjà prise en charge ou introuvable" });
-      }
+      const order = await Order.findOneAndUpdate({ _id: req.params.id, status: "nouvelle", livreur: null }, { $set: { status: "acceptee", livreur: req.user.id } }, { new: true, runValidators: true });
+      if (!order) return res.status(409).json({ error: "Commande déjà prise en charge ou introuvable" });
+      await User.findByIdAndUpdate(req.user.id, { $set: { isAvailable: false } });
       return res.json(order);
     }
-
     const order = await Order.findOne({ _id: req.params.id, livreur: req.user.id });
-    if (!order) {
-      return res.status(404).json({ error: "Commande introuvable ou non assignée" });
-    }
-
+    if (!order) return res.status(404).json({ error: "Commande introuvable ou non assignée" });
     const allowed = VALID_TRANSITIONS[order.status] || [];
-    if (!allowed.includes(status)) {
-      return res.status(400).json({ error: `Transition invalide: ${order.status} -> ${status}` });
-    }
-
-    order.status = status;
-    await order.save();
+    if (!allowed.includes(status)) return res.status(400).json({ error: `Transition invalide: ${order.status} -> ${status}` });
+    order.status = status; await order.save();
+    if (status === "livree") await User.findByIdAndUpdate(req.user.id, { $set: { isAvailable: true } });
     res.json(order);
-  } catch (err) {
-    if (err?.name === "CastError") {
-      return res.status(400).json({ error: "Identifiant de commande invalide" });
-    }
-    console.error("Update order error:", err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err) { if (err?.name === "CastError") return res.status(400).json({ error: "Identifiant de commande invalide" }); console.error("Update order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
+
+// ================= ADMIN =================
+app.get("/admin/stats", requireAuth, requireRole("admin"), async (req, res) => {
+  const [users, drivers, orders, delivered] = await Promise.all([
+    User.countDocuments(), User.countDocuments({ role: "livreur" }), Order.countDocuments(), Order.countDocuments({ status: "livree" })
+  ]);
+  const revenue = await Order.aggregate([{ $match: { status: "livree" } }, { $group: { _id: null, total: { $sum: "$fee" }, commission: { $sum: "$commission" }, driverEarnings: { $sum: "$driverEarnings" } } }]);
+  res.json({ users, drivers, orders, delivered, financials: revenue[0] || { total: 0, commission: 0, driverEarnings: 0 } });
+});
+app.get("/admin/users", requireAuth, requireRole("admin"), async (req, res) => res.json(await User.find().sort({ createdAt: -1 })));
+app.get("/admin/orders", requireAuth, requireRole("admin"), async (req, res) => res.json(await Order.find().sort({ createdAt: -1 })));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Wassel API en écoute sur le port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Wassel API en écoute sur le port ${PORT}`));
