@@ -16,6 +16,8 @@
     const item = document.createElement("div"); item.textContent = message; item.style.cssText = `padding:13px 16px;border-radius:14px;background:rgba(28,24,20,.95);color:white;box-shadow:0 10px 30px rgba(0,0,0,.18);font:500 13px Inter,Arial,sans-serif;border:1px solid ${success ? "rgba(214,178,94,.6)" : "rgba(255,255,255,.12)"}`; host.appendChild(item); setTimeout(() => item.remove(), 4200);
   }
   function nativeNotify(title, body) { if ("Notification" in window && Notification.permission === "granted") { try { new Notification(title, { body }); } catch {} } }
+  function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c])); }
+  function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("fr-TN", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }); }
   async function loadLeaflet() {
     if (window.L) return;
     await new Promise((resolve, reject) => {
@@ -35,7 +37,7 @@
     if (user?.role !== "client" || document.getElementById("velto-live-tracking")) return;
     const host = document.querySelector("#view-client .orders-panel"); if (!host) return;
     const panel = document.createElement("div"); panel.id = "velto-live-tracking"; panel.style.cssText = "margin-top:18px;padding-top:18px;border-top:1px solid rgba(36,28,16,.1)";
-    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h3 style="margin:0">Suivi en direct</h3><p id="velto-track-driver" style="margin:5px 0;color:#857a67;font-size:13px">Aucune course active.</p></div><span id="velto-track-status" class="order-status">—</span></div><div id="velto-track-progress" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px"></div><div id="velto-track-meta" style="margin-top:10px;color:#857a67;font-size:13px"></div><div id="velto-track-map" style="height:230px;border-radius:16px;overflow:hidden;margin-top:12px"></div>`;
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h3 style="margin:0">Suivi en direct</h3><p id="velto-track-driver" style="margin:5px 0;color:#857a67;font-size:13px">Aucune course active.</p></div><span id="velto-track-status" class="order-status">—</span></div><div id="velto-track-progress" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px"></div><div id="velto-track-history" style="margin-top:14px;display:flex;flex-direction:column;gap:7px"></div><div id="velto-track-meta" style="margin-top:10px;color:#857a67;font-size:13px"></div><div id="velto-track-map" style="height:230px;border-radius:16px;overflow:hidden;margin-top:12px"></div>`;
     host.appendChild(panel);
     loadLeaflet().then(() => { if (map || !document.getElementById("velto-track-map")) return; map = L.map("velto-track-map").setView([36.8065, 10.1815], 12); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors" }).addTo(map); }).catch(() => {});
   }
@@ -45,17 +47,23 @@
     const index = ORDER_FLOW.indexOf(status);
     el.innerHTML = ORDER_FLOW.map((key, i) => `<div style="padding:9px 4px;text-align:center;border-radius:10px;background:${i <= index ? "#211d18" : "#eee"};color:${i <= index ? "#fff" : "#857a67"};font-size:11px;font-weight:700">${i < index ? "✓ " : ""}${STATUS[key]}</div>`).join("");
   }
+  function renderHistory(history, fallbackStatus) {
+    const el = document.getElementById("velto-track-history"); if (!el) return;
+    const events = Array.isArray(history) && history.length ? history : [{ status: fallbackStatus, at: null }];
+    el.innerHTML = `<div style="font-size:12px;font-weight:800;margin-bottom:2px">Historique</div>` + events.map((event, index) => `<div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:11px;background:${index === events.length - 1 ? "rgba(214,178,94,.12)" : "rgba(0,0,0,.035)"}"><span style="width:8px;height:8px;border-radius:50%;background:${index === events.length - 1 ? "#d6b25e" : "#aaa"};flex:0 0 auto"></span><strong style="font-size:12px">${escapeHtml(STATUS[event.status] || event.status)}</strong><span style="margin-left:auto;color:#857a67;font-size:11px">${formatTime(event.at)}</span></div>`).join("");
+  }
   async function refreshClient(orders) {
     ensureClientPanel();
     const active = orders.find(o => ["nouvelle", "acceptee", "route"].includes(o.status));
     const statusEl = document.getElementById("velto-track-status"), driverEl = document.getElementById("velto-track-driver"), metaEl = document.getElementById("velto-track-meta");
-    if (!active) { if (statusEl) statusEl.textContent = "—"; if (driverEl) driverEl.textContent = "Aucune course active."; if (metaEl) metaEl.textContent = ""; renderProgress("nouvelle"); if (marker && map) { map.removeLayer(marker); marker = null; } return; }
+    if (!active) { if (statusEl) statusEl.textContent = "—"; if (driverEl) driverEl.textContent = "Aucune course active."; if (metaEl) metaEl.textContent = ""; renderProgress("nouvelle"); renderHistory([], "nouvelle"); if (marker && map) { map.removeLayer(marker); marker = null; } return; }
     try {
       const res = await fetch(`${API}/orders/${active.id}/tracking`, { headers: headers() }); if (!res.ok) return; const data = await res.json(); const label = STATUS[data.status] || data.status;
       if (statusEl) statusEl.textContent = label;
-      if (driverEl) driverEl.textContent = data.driver ? `Livreur : ${data.driver.name}${data.driver.location ? " · GPS actif" : ""}` : "En attente d'un livreur";
+      if (driverEl) driverEl.textContent = data.driver ? `Livreur : ${escapeHtml(data.driver.name)}${data.driver.location ? " · GPS actif" : ""}` : "En attente d'un livreur";
       if (metaEl) { const bits = []; if (Number.isFinite(Number(data.distanceKm))) bits.push(`Distance : ${Number(data.distanceKm).toFixed(1)} km`); if (Number.isFinite(Number(data.estimatedDurationMin))) bits.push(`Durée estimée : ${Math.max(1, Math.round(Number(data.estimatedDurationMin)))} min`); metaEl.textContent = bits.join(" · "); }
       renderProgress(data.status);
+      renderHistory(active.statusHistory || [], data.status);
       const previous = lastStatuses.get(active.id);
       if (previous && previous !== data.status) { const msg = `Commande #${String(active.id).slice(-5)} : ${label}`; toast(msg, data.status === "livree"); nativeNotify("Velto", msg); }
       lastStatuses.set(active.id, data.status);
