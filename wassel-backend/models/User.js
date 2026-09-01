@@ -17,6 +17,8 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+userSchema.index({ role: 1, isOnline: 1, isAvailable: 1 });
+
 userSchema.set("toJSON", {
   virtuals: true,
   transform: (doc, ret) => {
