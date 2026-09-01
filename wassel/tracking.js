@@ -6,8 +6,8 @@
   let map = null;
   let marker = null;
   let lastStatuses = new Map();
-  let timer = null;
-  let setupDone = false;
+  let lastToken = token;
+
   const headers = () => token ? { Authorization: `Bearer ${token}` } : {};
   function toast(message, success = false) {
     let host = document.getElementById("velto-toast-host");
@@ -22,8 +22,14 @@
       const script = document.createElement("script"); script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; script.onload = resolve; script.onerror = reject; document.head.appendChild(script);
     });
   }
-  async function restoreUser() { if (!token) return null; try { const res = await fetch(`${API}/auth/me`, { headers: headers() }); if (!res.ok) throw new Error(); const data = await res.json(); return data.user || null; } catch { return null; } }
-  async function getOrders() { if (!token || !user || !["client", "livreur"].includes(user.role)) return []; try { const res = await fetch(`${API}/orders`, { headers: headers() }); if (!res.ok) return []; const data = await res.json(); return Array.isArray(data) ? data : []; } catch { return []; } }
+  async function restoreUser() {
+    if (!token) return null;
+    try { const res = await fetch(`${API}/auth/me`, { headers: headers() }); if (!res.ok) return null; const data = await res.json(); return data.user || null; } catch { return null; }
+  }
+  async function getOrders() {
+    if (!token || !user || !["client", "livreur"].includes(user.role)) return [];
+    try { const res = await fetch(`${API}/orders`, { headers: headers() }); if (!res.ok) return []; const data = await res.json(); return Array.isArray(data) ? data : []; } catch { return []; }
+  }
   function ensureClientPanel() {
     if (user?.role !== "client" || document.getElementById("velto-live-tracking")) return;
     const host = document.querySelector("#view-client .orders-panel"); if (!host) return;
@@ -58,8 +64,21 @@
       const actions = card.querySelector(".order-actions"); if (!actions) return; const btn = document.createElement("button"); btn.className = "velto-cancel"; btn.textContent = "Annuler"; btn.addEventListener("click", () => cancelOrder(order)); actions.appendChild(btn);
     });
   }
-  async function monitor() { if (!user || !token) return; const orders = await getOrders(); if (user.role === "client") await refreshClient(orders); addCancelButtons(orders); }
-  async function setup() { if (setupDone) return; setupDone = true; user = await restoreUser(); if (!user) return; if ("Notification" in window && Notification.permission === "default") { try { await Notification.requestPermission(); } catch {} } monitor(); timer = setInterval(monitor, 3000); }
-  window.addEventListener("beforeunload", () => { if (timer) clearInterval(timer); });
-  setup();
+  async function syncSession() {
+    const currentToken = localStorage.getItem("velto_token") || null;
+    if (currentToken === lastToken && user) return true;
+    lastToken = currentToken; token = currentToken;
+    user = await restoreUser();
+    if (!user) { if (marker && map) { map.removeLayer(marker); marker = null; } return false; }
+    if ("Notification" in window && Notification.permission === "default") { try { await Notification.requestPermission(); } catch {} }
+    return true;
+  }
+  async function monitor() {
+    if (!(await syncSession()) || !user || !token) return;
+    const orders = await getOrders();
+    if (user.role === "client") await refreshClient(orders);
+    addCancelButtons(orders);
+  }
+  monitor();
+  setInterval(monitor, 3000);
 })();
