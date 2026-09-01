@@ -10,7 +10,17 @@ const { requireAuth, requireRole, JWT_SECRET } = require("./middleware/auth");
 
 const app = express();
 app.disable("x-powered-by");
-app.use(cors());
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://wassel-project.vercel.app,http://localhost:3000,http://127.0.0.1:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Origin non autorisée par CORS"));
+  },
+}));
 app.use(express.json({ limit: "32kb" }));
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/wassel";
@@ -107,7 +117,6 @@ app.get("/auth/me", requireAuth, async (req, res) => {
   catch (err) { res.status(500).json({ error: "Erreur serveur" }); }
 });
 
-// ================= DRIVER LOCATION / AVAILABILITY =================
 app.patch("/drivers/me/status", requireAuth, requireRole("livreur"), async (req, res) => {
   const isOnline = Boolean(req.body.isOnline);
   const isAvailable = isOnline ? Boolean(req.body.isAvailable) : false;
@@ -132,7 +141,6 @@ app.get("/drivers/nearby", requireAuth, async (req, res) => {
   res.json(result);
 });
 
-// ================= ORDERS =================
 app.get("/orders", requireAuth, async (req, res) => {
   try {
     let filter;
@@ -213,7 +221,6 @@ app.patch("/orders/:id/status", requireAuth, requireRole("livreur"), async (req,
   } catch (err) { if (err?.name === "CastError") return res.status(400).json({ error: "Identifiant de commande invalide" }); console.error("Update order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
-// ================= ADMIN =================
 app.get("/admin/stats", requireAuth, requireRole("admin"), async (req, res) => {
   const [users, drivers, orders, delivered] = await Promise.all([
     User.countDocuments(), User.countDocuments({ role: "livreur" }), Order.countDocuments(), Order.countDocuments({ status: "livree" })
