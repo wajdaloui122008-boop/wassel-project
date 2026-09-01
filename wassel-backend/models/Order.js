@@ -33,6 +33,16 @@ const orderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Older clients/server routes may only send a [TYPE] prefix in `pkg`.
+// Keep serviceType correct even when the request body does not contain it yet.
+orderSchema.pre("validate", function (next) {
+  if (this.serviceType === "colis" && typeof this.pkg === "string") {
+    const match = this.pkg.match(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]/i);
+    if (match) this.serviceType = match[1].toLowerCase();
+  }
+  next();
+});
+
 orderSchema.set("toJSON", { virtuals: true, transform: (doc, ret) => { delete ret._id; delete ret.__v; } });
 
 module.exports = mongoose.model("Order", orderSchema);
