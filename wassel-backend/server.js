@@ -33,6 +33,7 @@ const VALID_TRANSITIONS = {
 };
 const VALID_ROLES = ["client", "livreur", "taxi"];
 const VALID_PAYMENT_METHODS = ["especes", "carte", "wallet"];
+const VALID_SERVICE_TYPES = ["colis", "food", "taxi", "shop", "market"];
 
 function signToken(user) {
   return jwt.sign(
@@ -146,8 +147,10 @@ app.get("/orders", requireAuth, async (req, res) => {
 app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
   try {
     const pickup = cleanString(req.body.pickup, 250), dropoff = cleanString(req.body.dropoff, 250), pkg = cleanString(req.body.pkg, 500);
+    const serviceType = cleanString(req.body.serviceType, 20).toLowerCase();
     const paymentMethod = cleanString(req.body.paymentMethod, 20) || "especes";
     if (!pickup || !dropoff || !pkg) return res.status(400).json({ error: "pickup, dropoff et pkg sont requis" });
+    if (!VALID_SERVICE_TYPES.includes(serviceType)) return res.status(400).json({ error: "Type de service invalide" });
     if (!VALID_PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: "Méthode de paiement invalide" });
     if (!validCoordinatePair(req.body.pickupLocation) || !validCoordinatePair(req.body.dropoffLocation)) return res.status(400).json({ error: "Les positions pickup et dropoff sont requises" });
     const pickupLocation = { lat: Number(req.body.pickupLocation.lat), lng: Number(req.body.pickupLocation.lng) };
@@ -155,7 +158,7 @@ app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
     const distanceKm = Math.round(haversineKm(pickupLocation, dropoffLocation) * 100) / 100;
     const pricing = calculatePricing(distanceKm);
     const estimatedDurationMin = Math.max(5, Math.round(distanceKm * 3));
-    const order = await Order.create({ pickup, dropoff, pickupLocation, dropoffLocation, distanceKm, estimatedDurationMin, pkg, client: req.user.id, paymentMethod, ...pricing });
+    const order = await Order.create({ pickup, dropoff, pickupLocation, dropoffLocation, distanceKm, estimatedDurationMin, pkg, client: req.user.id, serviceType, paymentMethod, ...pricing });
     res.status(201).json(order);
   } catch (err) { console.error("Create order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
@@ -166,7 +169,7 @@ app.get("/orders/:id/tracking", requireAuth, async (req, res) => {
     if (!order) return res.status(404).json({ error: "Commande introuvable" });
     const allowed = req.user.role === "admin" || String(order.client) === req.user.id || (order.livreur && String(order.livreur._id) === req.user.id);
     if (!allowed) return res.status(403).json({ error: "Accès interdit" });
-    res.json({ id: order.id, status: order.status, pickupLocation: order.pickupLocation || null, dropoffLocation: order.dropoffLocation || null, distanceKm: order.distanceKm, estimatedDurationMin: order.estimatedDurationMin, driver: order.livreur || null });
+    res.json({ id: order.id, status: order.status, serviceType: order.serviceType, paymentMethod: order.paymentMethod, paymentStatus: order.paymentStatus, transactionId: order.transactionId || "", pickupLocation: order.pickupLocation || null, dropoffLocation: order.dropoffLocation || null, distanceKm: order.distanceKm, estimatedDurationMin: order.estimatedDurationMin, driver: order.livreur || null });
   } catch (err) { if (err?.name === "CastError") return res.status(400).json({ error: "Identifiant de commande invalide" }); console.error("Tracking error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
