@@ -57,10 +57,10 @@
     try { const res = await fetch(`${API}/orders/${order.id}/cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...headers() }, body: JSON.stringify({ reason }) }); const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || "Impossible d'annuler la commande"); toast("Commande annulée", true); monitor(); } catch (err) { toast(err.message || "Impossible d'annuler la commande"); }
   }
   function addCancelButtons(orders) {
-    if (!user) return;
+    if (!user || user.role !== "livreur") return;
     document.querySelectorAll(".order-card").forEach(card => {
       const idText = card.querySelector(".order-id")?.textContent || ""; const order = orders.find(o => idText.endsWith(String(o.id || "").slice(-5))); if (!order || card.querySelector(".velto-cancel")) return;
-      const allowed = (user.role === "client" && ["nouvelle", "acceptee"].includes(order.status)) || (user.role === "livreur" && order.status === "acceptee" && String(order.livreur || "") === String(user.id || "")); if (!allowed) return;
+      const allowed = order.status === "acceptee" && String(order.livreur || "") === String(user.id || ""); if (!allowed) return;
       const actions = card.querySelector(".order-actions"); if (!actions) return; const btn = document.createElement("button"); btn.className = "velto-cancel"; btn.textContent = "Annuler"; btn.addEventListener("click", () => cancelOrder(order)); actions.appendChild(btn);
     });
   }
