@@ -35,6 +35,11 @@ const orderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Common dashboard queries: client history, driver active/history, and newest requests.
+orderSchema.index({ client: 1, createdAt: -1 });
+orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
+
 // Older clients/server routes may only send a [TYPE] prefix in `pkg`.
 // Keep serviceType correct even when the request body does not contain it yet.
 orderSchema.pre("validate", function (next) {
