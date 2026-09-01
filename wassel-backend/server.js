@@ -139,7 +139,7 @@ app.post("/auth/login", authRateLimit, async (req, res) => {
     const email = cleanString(req.body.email, 160).toLowerCase();
     const password = typeof req.body.password === "string" ? req.body.password : "";
     if (!email || !password) return res.status(400).json({ error: "email et password sont requis" });
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select("+password");
     if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     res.json({ token: signToken(user), user });
   } catch (err) { console.error("Login error:", err); res.status(500).json({ error: "Erreur serveur" }); }
@@ -150,7 +150,8 @@ app.get("/auth/me", requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: "Utilisateur introuvable" });
     res.json({ user });
-  } catch (err) { res.status(500).json({ error: "Erreur serveur" }); }
+  } catch (err) { res.status(500).json({ error: "Erreur serveur" });
+  }
 });
 
 app.patch("/drivers/me/status", requireAuth, requireRole("livreur"), async (req, res) => {
@@ -195,8 +196,6 @@ app.get("/orders", requireAuth, async (req, res) => {
     let query = Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
     let totalPromise = Order.countDocuments(filter);
 
-    // Dispatch MVP: when a driver has a fresh GPS position, put nearby new jobs first
-    // instead of dumping the entire queue in arbitrary creation order.
     if (req.user.role === "livreur") {
       const driver = await User.findById(req.user.id).select("location isOnline isAvailable");
       if (driver?.isOnline && driver?.isAvailable && validCoordinatePair(driver.location)) {
