@@ -1,25 +1,33 @@
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const isProduction = process.env.NODE_ENV === "production";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (isProduction && !JWT_SECRET) {
+  throw new Error("JWT_SECRET must be configured in production");
+}
+
+const effectiveSecret = JWT_SECRET || "dev-only-secret-change-me";
 
 function requireAuth(req, res, next) {
-  const header = req.headers.authorization; // expected format: "Bearer <token>"
+  const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Authentification requise" });
   }
 
-  const token = header.split(" ")[1];
+  const token = header.slice(7).trim();
+  if (!token) {
+    return res.status(401).json({ error: "Authentification requise" });
+  }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload; // { id, role, name }
+    req.user = jwt.verify(token, effectiveSecret);
     next();
   } catch (err) {
     return res.status(401).json({ error: "Session invalide, reconnectez-vous" });
   }
 }
 
-// Restricts a route to a specific role (e.g. only livreurs can accept orders)
 function requireRole(role) {
   return (req, res, next) => {
     if (req.user.role !== role) {
@@ -29,4 +37,4 @@ function requireRole(role) {
   };
 }
 
-module.exports = { requireAuth, requireRole, JWT_SECRET };
+module.exports = { requireAuth, requireRole, JWT_SECRET: effectiveSecret };
