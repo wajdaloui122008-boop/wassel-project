@@ -10,7 +10,6 @@ const COUNTRIES = [
   { code: "DE", flag: "🇩🇪", name: "Allemagne" }, { code: "BE", flag: "🇧🇪", name: "Belgique" },
   { code: "CA", flag: "🇨🇦", name: "Canada" }, { code: "AE", flag: "🇦🇪", name: "Émirats" },
 ];
-
 let orders = [];
 let currentUser = null;
 let authToken = localStorage.getItem("velto_token") || null;
@@ -21,253 +20,65 @@ let ordersInterval = null;
 
 const countryGrid = document.getElementById("country-grid");
 COUNTRIES.forEach((c, i) => {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "chip" + (i === 0 ? " selected" : "");
-  btn.dataset.country = c.code;
-  btn.innerHTML = `${c.flag} ${c.name}`;
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("#country-grid .chip").forEach((el) => el.classList.remove("selected"));
-    btn.classList.add("selected");
-    selectedCountry = c.code;
-  });
-  countryGrid.appendChild(btn);
+  const btn = document.createElement("button"); btn.type = "button"; btn.className = "chip" + (i === 0 ? " selected" : ""); btn.dataset.country = c.code; btn.innerHTML = `${c.flag} ${c.name}`;
+  btn.addEventListener("click", () => { document.querySelectorAll("#country-grid .chip").forEach((el) => el.classList.remove("selected")); btn.classList.add("selected"); selectedCountry = c.code; }); countryGrid.appendChild(btn);
 });
-
-document.querySelectorAll(".role-card").forEach((card) => card.addEventListener("click", () => {
-  document.querySelectorAll(".role-card").forEach((c) => c.classList.remove("selected"));
-  card.classList.add("selected");
-  selectedRole = card.dataset.role;
-}));
-
-document.querySelectorAll(".btn-oauth").forEach((btn) => btn.addEventListener("click", () => {
-  alert(`La connexion avec ${btn.dataset.provider} arrive bientôt. Utilisez l'email pour l'instant.`);
-}));
-
-document.querySelectorAll(".payment-option").forEach((btn) => btn.addEventListener("click", () => {
-  document.querySelectorAll(".payment-option").forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  selectedPayment = btn.dataset.payment;
-}));
-
-document.querySelectorAll(".category-tab").forEach((tab) => tab.addEventListener("click", () => {
-  document.querySelectorAll(".category-tab").forEach((t) => t.classList.remove("active"));
-  tab.classList.add("active");
-  document.querySelectorAll(".category-panel").forEach((p) => p.classList.add("hidden"));
-  const panel = document.getElementById(`category-${tab.dataset.category}`);
-  if (panel) panel.classList.remove("hidden");
-}));
-
+document.querySelectorAll(".role-card").forEach((card) => card.addEventListener("click", () => { document.querySelectorAll(".role-card").forEach((c) => c.classList.remove("selected")); card.classList.add("selected"); selectedRole = card.dataset.role; }));
+document.querySelectorAll(".btn-oauth").forEach((btn) => btn.addEventListener("click", () => alert(`La connexion avec ${btn.dataset.provider} arrive bientôt. Utilisez l'email pour l'instant.`)));
+document.querySelectorAll(".payment-option").forEach((btn) => btn.addEventListener("click", () => { document.querySelectorAll(".payment-option").forEach((b) => b.classList.remove("active")); btn.classList.add("active"); selectedPayment = btn.dataset.payment; }));
+document.querySelectorAll(".category-tab").forEach((tab) => tab.addEventListener("click", () => { document.querySelectorAll(".category-tab").forEach((t) => t.classList.remove("active")); tab.classList.add("active"); document.querySelectorAll(".category-panel").forEach((p) => p.classList.add("hidden")); const panel = document.getElementById(`category-${tab.dataset.category}`); if (panel) panel.classList.remove("hidden"); }));
 function authHeaders() { return authToken ? { Authorization: `Bearer ${authToken}` } : {}; }
-
-async function readJson(res) {
-  const text = await res.text();
-  try { return text ? JSON.parse(text) : {}; } catch { return {}; }
-}
-
-async function tryRestoreSession() {
-  if (!authToken) return showAuthView();
-  try {
-    const res = await fetch(`${API_URL}/auth/me`, { headers: authHeaders() });
-    if (!res.ok) throw new Error("Session expirée");
-    const data = await readJson(res);
-    if (!data.user) throw new Error("Session invalide");
-    onLoggedIn(data.user, authToken);
-  } catch {
-    logout();
-  }
-}
-
+async function readJson(res) { const text = await res.text(); try { return text ? JSON.parse(text) : {}; } catch { return {}; } }
+async function tryRestoreSession() { if (!authToken) return showAuthView(); try { const res = await fetch(`${API_URL}/auth/me`, { headers: authHeaders() }); if (!res.ok) throw new Error("Session expirée"); const data = await readJson(res); if (!data.user) throw new Error("Session invalide"); onLoggedIn(data.user, authToken); } catch { logout(); } }
 function onLoggedIn(user, token) {
-  currentUser = user;
-  authToken = token;
-  localStorage.setItem("velto_token", token);
-  document.getElementById("topbar-user").classList.remove("hidden");
-  const roleLabel = { client: "Client", livreur: "Livreur", taxi: "Taxi", admin: "Admin" }[user.role] || user.role;
-  document.getElementById("user-name").textContent = `${user.name} (${roleLabel})`;
-  views.forEach((v) => v.classList.remove("active"));
-  const roleView = document.getElementById(`view-${user.role}`);
-  if (roleView) roleView.classList.add("active");
-  fetchOrders();
-  if (ordersInterval) clearInterval(ordersInterval);
-  ordersInterval = setInterval(fetchOrders, 5000);
+  currentUser = user; authToken = token; localStorage.setItem("velto_token", token); document.getElementById("topbar-user").classList.remove("hidden");
+  const roleLabel = { client: "Client", livreur: "Livreur", taxi: "Taxi", admin: "Admin" }[user.role] || user.role; document.getElementById("user-name").textContent = `${user.name} (${roleLabel})`;
+  views.forEach((v) => v.classList.remove("active")); const roleView = document.getElementById(`view-${user.role}`); if (roleView) roleView.classList.add("active");
+  fetchOrders(); if (ordersInterval) clearInterval(ordersInterval); ordersInterval = setInterval(fetchOrders, 5000);
 }
-
-function logout() {
-  if (ordersInterval) { clearInterval(ordersInterval); ordersInterval = null; }
-  localStorage.removeItem("velto_token");
-  authToken = null;
-  currentUser = null;
-  orders = [];
-  document.getElementById("topbar-user").classList.add("hidden");
-  showAuthView();
-}
-
-function showAuthView() {
-  views.forEach((v) => v.classList.remove("active"));
-  document.getElementById("view-auth").classList.add("active");
-}
-
+function logout() { if (ordersInterval) { clearInterval(ordersInterval); ordersInterval = null; } localStorage.removeItem("velto_token"); authToken = null; currentUser = null; orders = []; document.getElementById("topbar-user").classList.add("hidden"); showAuthView(); }
+function showAuthView() { views.forEach((v) => v.classList.remove("active")); document.getElementById("view-auth").classList.add("active"); }
 document.getElementById("logout-btn").addEventListener("click", logout);
+const authTabs = document.querySelectorAll(".auth-tab"); const loginForm = document.getElementById("login-form"); const registerForm = document.getElementById("register-form");
+authTabs.forEach((tab) => tab.addEventListener("click", () => { authTabs.forEach((t) => t.classList.remove("active")); tab.classList.add("active"); const login = tab.dataset.auth === "login"; loginForm.classList.toggle("hidden", !login); registerForm.classList.toggle("hidden", login); }));
+loginForm.addEventListener("submit", async (e) => { e.preventDefault(); const errorEl = document.getElementById("login-error"); errorEl.textContent = ""; try { const res = await fetch(`${API_URL}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: document.getElementById("login-email").value.trim(), password: document.getElementById("login-password").value }) }); const data = await readJson(res); if (!res.ok) throw new Error(data.error || "Échec de la connexion"); onLoggedIn(data.user, data.token); } catch (err) { errorEl.textContent = err.message; } });
+registerForm.addEventListener("submit", async (e) => { e.preventDefault(); const errorEl = document.getElementById("register-error"); errorEl.textContent = ""; if (!selectedRole) { errorEl.textContent = "Choisissez si vous êtes client, livreur ou chauffeur taxi."; return; } try { const res = await fetch(`${API_URL}/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: document.getElementById("register-name").value.trim(), email: document.getElementById("register-email").value.trim(), password: document.getElementById("register-password").value, role: selectedRole, country: selectedCountry, phone: document.getElementById("register-phone").value.trim() }) }); const data = await readJson(res); if (!res.ok) throw new Error(data.error || "Échec de la création du compte"); onLoggedIn(data.user, data.token); } catch (err) { errorEl.textContent = err.message; } });
+async function fetchOrders() { if (!authToken || !currentUser || currentUser.role === "taxi") return; try { const res = await fetch(`${API_URL}/orders`, { headers: authHeaders() }); if (res.status === 401) return logout(); const data = await readJson(res); if (!res.ok) throw new Error(data.error || "Erreur de chargement"); orders = Array.isArray(data) ? data : []; } catch (err) { console.error("Impossible de contacter le serveur:", err); } renderAll(); }
+async function createOrder(pickup, dropoff, pkg, pickupLocation, dropoffLocation) { try { const res = await fetch(`${API_URL}/orders`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ pickup, dropoff, pkg, paymentMethod: selectedPayment, pickupLocation, dropoffLocation }) }); const data = await readJson(res); if (!res.ok) throw new Error(data.error || "Échec de la création de la commande"); orders.unshift(data); renderAll(); } catch (err) { console.error(err); alert(err.message || "Impossible d'envoyer la commande."); } }
+async function updateOrderStatus(id, status) { try { const res = await fetch(`${API_URL}/orders/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ status }) }); const data = await readJson(res); if (!res.ok) throw new Error(data.error || "Échec de la mise à jour"); const index = orders.findIndex((o) => o.id === id); if (index >= 0) orders[index] = data; renderAll(); } catch (err) { console.error(err); alert(err.message || "Impossible de mettre à jour la commande."); } }
+const views = document.querySelectorAll(".view"); const orderForm = document.getElementById("order-form");
+orderForm.addEventListener("submit", (e) => { e.preventDefault(); const pickup = document.getElementById("pickup").value.trim(); const dropoff = document.getElementById("dropoff").value.trim(); const pkg = document.getElementById("package").value.trim(); if (!pickup || !dropoff || !pkg) return; if (!window.veltoLocations?.pickup || !window.veltoLocations?.dropoff) return alert("Choisissez les deux positions sur la carte avant d'envoyer la commande."); createOrder(pickup, dropoff, pkg, window.veltoLocations.pickup, window.veltoLocations.dropoff); orderForm.reset(); window.veltoLocations = { pickup: null, dropoff: null }; if (window.veltoMapReset) window.veltoMapReset(); });
+const template = document.getElementById("order-card-template"); const PAYMENT_LABELS = { especes: "Espèces", carte: "Carte", wallet: "Wallet" };
+function buildCard(order, actions, index, { showEarnings } = {}) { const node = template.content.cloneNode(true); const card = node.querySelector(".order-card"); card.style.setProperty("--i", index); card.querySelector(".order-id").textContent = `#${String(order.id || "").slice(-5)}`; const statusEl = card.querySelector(".order-status"); statusEl.textContent = STATUS_LABELS[order.status] || order.status; statusEl.classList.add(`status-${order.status}`); const [pickupPoint, dropoffPoint] = card.querySelectorAll(".route-point"); pickupPoint.querySelector(".route-label").textContent = order.pickup; dropoffPoint.querySelector(".route-label").textContent = order.dropoff; const progress = STATUS_PROGRESS[order.status] ?? 0; card.querySelector(".route-progress").style.width = `${progress}%`; card.querySelector(".route-marker").style.left = `${progress}%`; card.querySelector(".package-desc").textContent = `📦 ${order.pkg}`; const fee = Number(order.fee ?? 0); const paymentLabel = PAYMENT_LABELS[order.paymentMethod] || "Espèces"; const feeLine = card.querySelector(".fee-line"); if (showEarnings) feeLine.textContent = `Frais: ${fee.toFixed(2)} DT · Vous recevez: ${Number(order.driverEarnings ?? fee * (1 - COMMISSION_RATE)).toFixed(2)} DT · ${paymentLabel}`; else feeLine.textContent = `Frais de livraison: ${fee.toFixed(2)} DT · ${paymentLabel}`; const actionsEl = card.querySelector(".order-actions"); actions.forEach(({ label, accent, onClick }) => { const btn = document.createElement("button"); btn.textContent = label; if (accent) btn.classList.add("accent"); btn.addEventListener("click", onClick); actionsEl.appendChild(btn); }); return node; }
+function renderList(containerId, list, emptyMessage, actionsFor, opts) { const container = document.getElementById(containerId); if (!container) return; container.innerHTML = ""; if (!list.length) { const p = document.createElement("p"); p.className = "empty-state"; p.textContent = emptyMessage; container.appendChild(p); return; } list.forEach((order, index) => container.appendChild(buildCard(order, actionsFor(order), index, opts))); }
+function renderClientOrders() { renderList("client-orders", [...orders].reverse(), "Aucune commande pour l'instant. Remplissez le formulaire pour commencer.", () => []); }
+function renderLivreurViews() { renderList("available-orders", orders.filter((o) => o.status === "nouvelle"), "Aucune commande disponible pour le moment.", (order) => [{ label: "Accepter la course", accent: true, onClick: () => updateOrderStatus(order.id, "acceptee") }], { showEarnings: true }); const mine = orders.filter((o) => ["acceptee", "route", "livree"].includes(o.status)); renderList("my-deliveries", [...mine].reverse(), "Vous n'avez accepté aucune course.", (order) => { if (order.status === "acceptee") return [{ label: "Démarrer la course", accent: true, onClick: () => updateOrderStatus(order.id, "route") }]; if (order.status === "route") return [{ label: "Marquer comme livrée", accent: true, onClick: () => updateOrderStatus(order.id, "livree") }]; return []; }, { showEarnings: true }); }
+function renderAll() { if (!currentUser) return; if (currentUser.role === "client") renderClientOrders(); else if (currentUser.role === "livreur") renderLivreurViews(); }
 
-const authTabs = document.querySelectorAll(".auth-tab");
-const loginForm = document.getElementById("login-form");
-const registerForm = document.getElementById("register-form");
-authTabs.forEach((tab) => tab.addEventListener("click", () => {
-  authTabs.forEach((t) => t.classList.remove("active"));
-  tab.classList.add("active");
-  const login = tab.dataset.auth === "login";
-  loginForm.classList.toggle("hidden", !login);
-  registerForm.classList.toggle("hidden", login);
-}));
-
-loginForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById("login-error");
-  errorEl.textContent = "";
-  try {
-    const res = await fetch(`${API_URL}/auth/login`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: document.getElementById("login-email").value.trim(), password: document.getElementById("login-password").value }),
-    });
-    const data = await readJson(res);
-    if (!res.ok) throw new Error(data.error || "Échec de la connexion");
-    onLoggedIn(data.user, data.token);
-  } catch (err) { errorEl.textContent = err.message; }
-});
-
-registerForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById("register-error");
-  errorEl.textContent = "";
-  if (!selectedRole) { errorEl.textContent = "Choisissez si vous êtes client, livreur ou chauffeur taxi."; return; }
-  try {
-    const res = await fetch(`${API_URL}/auth/register`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: document.getElementById("register-name").value.trim(),
-        email: document.getElementById("register-email").value.trim(),
-        password: document.getElementById("register-password").value,
-        role: selectedRole, country: selectedCountry,
-        phone: document.getElementById("register-phone").value.trim(),
-      }),
-    });
-    const data = await readJson(res);
-    if (!res.ok) throw new Error(data.error || "Échec de la création du compte");
-    onLoggedIn(data.user, data.token);
-  } catch (err) { errorEl.textContent = err.message; }
-});
-
-async function fetchOrders() {
-  if (!authToken || !currentUser || currentUser.role === "taxi" || currentUser.role === "admin") return;
-  try {
-    const res = await fetch(`${API_URL}/orders`, { headers: authHeaders() });
-    if (res.status === 401) return logout();
-    const data = await readJson(res);
-    if (!res.ok) throw new Error(data.error || "Erreur de chargement");
-    orders = Array.isArray(data) ? data : [];
-  } catch (err) { console.error("Impossible de contacter le serveur:", err); }
-  renderAll();
+// ================= REAL MAP + DRIVER GPS + ADMIN =================
+window.veltoLocations = { pickup: null, dropoff: null };
+window.veltoMapReset = () => {};
+const BASE_FEE_UI = 3, PRICE_PER_KM_UI = 0.8, MIN_FEE_UI = 5;
+function haversineUi(a, b) { const R = 6371, dLat = (b.lat-a.lat)*Math.PI/180, dLng = (b.lng-a.lng)*Math.PI/180, la1=a.lat*Math.PI/180, la2=b.lat*Math.PI/180; const x=Math.sin(dLat/2)**2+Math.sin(dLng/2)**2*Math.cos(la1)*Math.cos(la2); return 2*R*Math.asin(Math.sqrt(x)); }
+function loadLeaflet() { return new Promise((resolve, reject) => { if (window.L) return resolve(); const css=document.createElement("link"); css.rel="stylesheet"; css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css); const s=document.createElement("script"); s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; s.onload=resolve; s.onerror=reject; document.head.appendChild(s); }); }
+async function initClientMap() {
+  if (document.getElementById("velto-map")) return; await loadLeaflet();
+  const form=document.getElementById("order-form"), box=document.createElement("div"); box.innerHTML=`<div id="velto-map" style="height:300px;border-radius:18px;overflow:hidden;border:1px solid rgba(36,28,16,.1);margin:4px 0"></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="pick-pickup" class="btn-ghost">📍 Choisir départ</button><button type="button" id="pick-dropoff" class="btn-ghost">🎯 Choisir arrivée</button><button type="button" id="use-gps" class="btn-ghost">◎ Ma position</button></div><p id="route-estimate" style="margin:8px 0 0;color:#857a67;font-size:13px">Choisissez le départ et l'arrivée sur la carte.</p>`; form.insertBefore(box, form.querySelector(".payment-toggle"));
+  const map=L.map("velto-map").setView([36.8065,10.1815],12); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap contributors"}).addTo(map); let mode="pickup", markers={};
+  function place(type,latlng){ window.veltoLocations[type]={lat:Number(latlng.lat),lng:Number(latlng.lng)}; if(markers[type]) markers[type].setLatLng(latlng); else markers[type]=L.marker(latlng).addTo(map).bindPopup(type==="pickup"?"Départ":"Arrivée").openPopup(); updateEstimate(); }
+  map.on("click",e=>place(mode,e.latlng)); document.getElementById("pick-pickup").onclick=()=>mode="pickup"; document.getElementById("pick-dropoff").onclick=()=>mode="dropoff";
+  document.getElementById("use-gps").onclick=()=>navigator.geolocation?.getCurrentPosition(p=>{place("pickup",{lat:p.coords.latitude,lng:p.coords.longitude});map.setView([p.coords.latitude,p.coords.longitude],15)},()=>alert("Impossible d'obtenir votre position."));
+  function updateEstimate(){ const a=window.veltoLocations.pickup,b=window.veltoLocations.dropoff,el=document.getElementById("route-estimate"); if(!a||!b){el.textContent=`Mode: ${mode==="pickup"?"choix du départ":"choix de l'arrivée"}`;return;} const km=haversineUi(a,b),fee=Math.max(MIN_FEE_UI,BASE_FEE_UI+km*PRICE_PER_KM_UI); el.textContent=`Distance: ${km.toFixed(2)} km · Estimation: ${fee.toFixed(2)} DT · commission Velto: 15%`; }
+  window.veltoMapReset=()=>{window.veltoLocations={pickup:null,dropoff:null};Object.values(markers).forEach(m=>map.removeLayer(m));markers={};updateEstimate();};
 }
-
-async function createOrder(pickup, dropoff, pkg) {
-  try {
-    const res = await fetch(`${API_URL}/orders`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ pickup, dropoff, pkg, paymentMethod: selectedPayment }),
-    });
-    const data = await readJson(res);
-    if (!res.ok) throw new Error(data.error || "Échec de la création de la commande");
-    orders.unshift(data);
-    renderAll();
-  } catch (err) { console.error(err); alert(err.message || "Impossible d'envoyer la commande."); }
+function ensureDriverPanel(){ if(document.getElementById("driver-live-panel")) return; const view=document.getElementById("view-livreur"); if(!view)return; const panel=document.createElement("div"); panel.className="glass-panel"; panel.id="driver-live-panel"; panel.innerHTML=`<h2>Mode livreur</h2><p class="subtitle">Activez votre disponibilité pour recevoir des courses et partagez votre GPS.</p><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="driver-online" class="btn-primary" type="button">Passer en ligne</button><span id="driver-location-status" style="font-size:13px;color:#857a67">Hors ligne</span></div>`; view.prepend(panel); let online=false,watch=null;
+  async function status(isOnline){ online=isOnline; const res=await fetch(`${API_URL}/drivers/me/status`,{method:"PATCH",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify({isOnline,isAvailable:isOnline})}); if(!res.ok){alert("Impossible de changer votre statut.");return;} document.getElementById("driver-online").textContent=online?"Passer hors ligne":"Passer en ligne"; document.getElementById("driver-location-status").textContent=online?"🟢 En ligne · GPS actif":"⚪ Hors ligne"; if(online){ watch=navigator.geolocation?.watchPosition(sendLocation,()=>{}, {enableHighAccuracy:true,maximumAge:5000,timeout:10000}); } else if(watch!==null){navigator.geolocation?.clearWatch(watch);watch=null;} }
+  async function sendLocation(p){ if(!online)return; await fetch(`${API_URL}/drivers/me/location`,{method:"PATCH",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify({lat:p.coords.latitude,lng:p.coords.longitude})}).catch(()=>{}); }
+  document.getElementById("driver-online").onclick=()=>status(!online);
 }
-
-async function updateOrderStatus(id, status) {
-  try {
-    const res = await fetch(`${API_URL}/orders/${id}/status`, {
-      method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ status }),
-    });
-    const data = await readJson(res);
-    if (!res.ok) throw new Error(data.error || "Échec de la mise à jour");
-    const index = orders.findIndex((o) => o.id === id);
-    if (index >= 0) orders[index] = data;
-    renderAll();
-  } catch (err) { console.error(err); alert(err.message || "Impossible de mettre à jour la commande."); }
-}
-
-const views = document.querySelectorAll(".view");
-const orderForm = document.getElementById("order-form");
-orderForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const pickup = document.getElementById("pickup").value.trim();
-  const dropoff = document.getElementById("dropoff").value.trim();
-  const pkg = document.getElementById("package").value.trim();
-  if (!pickup || !dropoff || !pkg) return;
-  createOrder(pickup, dropoff, pkg);
-  orderForm.reset();
-});
-
-const template = document.getElementById("order-card-template");
-const PAYMENT_LABELS = { especes: "Espèces", carte: "Carte", wallet: "Wallet" };
-function buildCard(order, actions, index, { showEarnings } = {}) {
-  const node = template.content.cloneNode(true);
-  const card = node.querySelector(".order-card");
-  card.style.setProperty("--i", index);
-  card.querySelector(".order-id").textContent = `#${order.id.slice(-5)}`;
-  const statusEl = card.querySelector(".order-status");
-  statusEl.textContent = STATUS_LABELS[order.status] || order.status;
-  statusEl.classList.add(`status-${order.status}`);
-  const [pickupPoint, dropoffPoint] = card.querySelectorAll(".route-point");
-  pickupPoint.querySelector(".route-label").textContent = order.pickup;
-  dropoffPoint.querySelector(".route-label").textContent = order.dropoff;
-  const progress = STATUS_PROGRESS[order.status] ?? 0;
-  card.querySelector(".route-progress").style.width = `${progress}%`;
-  card.querySelector(".route-marker").style.left = `${progress}%`;
-  card.querySelector(".package-desc").textContent = `📦 ${order.pkg}`;
-  const fee = Number(order.fee ?? 8);
-  const paymentLabel = PAYMENT_LABELS[order.paymentMethod] || "Espèces";
-  const feeLine = card.querySelector(".fee-line");
-  if (showEarnings) {
-    const earnings = (fee * (1 - COMMISSION_RATE)).toFixed(2);
-    feeLine.textContent = `Frais: ${fee.toFixed(2)} DT · Vous recevez: ${earnings} DT (commission Velto 15%) · ${paymentLabel}`;
-  } else feeLine.textContent = `Frais de livraison: ${fee.toFixed(2)} DT · ${paymentLabel}`;
-  const actionsEl = card.querySelector(".order-actions");
-  actions.forEach(({ label, accent, onClick }) => {
-    const btn = document.createElement("button"); btn.textContent = label;
-    if (accent) btn.classList.add("accent");
-    btn.addEventListener("click", onClick); actionsEl.appendChild(btn);
-  });
-  return node;
-}
-
-function renderList(containerId, list, emptyMessage, actionsFor, opts) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = "";
-  if (!list.length) { const p = document.createElement("p"); p.className = "empty-state"; p.textContent = emptyMessage; container.appendChild(p); return; }
-  list.forEach((order, index) => container.appendChild(buildCard(order, actionsFor(order), index, opts)));
-}
-
-function renderClientOrders() {
-  renderList("client-orders", [...orders].reverse(), "Aucune commande pour l'instant. Remplissez le formulaire pour commencer.", () => []);
-}
-
-function renderLivreurViews() {
-  renderList("available-orders", orders.filter((o) => o.status === "nouvelle"), "Aucune commande disponible pour le moment.", (order) => [{ label: "Accepter la course", accent: true, onClick: () => updateOrderStatus(order.id, "acceptee") }], { showEarnings: true });
-  const mine = orders.filter((o) => ["acceptee", "route", "livree"].includes(o.status));
-  renderList("my-deliveries", [...mine].reverse(), "Vous n'avez accepté aucune course.", (order) => {
-    if (order.status === "acceptee") return [{ label: "Démarrer la course", accent: true, onClick: () => updateOrderStatus(order.id, "route") }];
-    if (order.status === "route") return [{ label: "Marquer comme livrée", accent: true, onClick: () => updateOrderStatus(order.id, "livree") }];
-    return [];
-  }, { showEarnings: true });
-}
-
-function renderAll() {
-  if (!currentUser) return;
-  if (currentUser.role === "client") renderClientOrders();
-  else if (currentUser.role === "livreur") renderLivreurViews();
-}
-
+function ensureAdminView(){ if(document.getElementById("view-admin"))return; const main=document.querySelector("main"),section=document.createElement("section"); section.id="view-admin";section.className="view";section.innerHTML=`<div class="glass-panel"><h1>Administration</h1><p class="subtitle">Vue globale de Velto.</p><div id="admin-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px"></div></div><div class="glass-panel"><h2>Dernières commandes</h2><div id="admin-orders" class="orders-list"></div></div>`;main.appendChild(section); }
+async function refreshAdmin(){ if(currentUser?.role!=="admin")return; ensureAdminView(); const [s,o]=await Promise.all([fetch(`${API_URL}/admin/stats`,{headers:authHeaders()}),fetch(`${API_URL}/admin/orders`,{headers:authHeaders()})]); if(!s.ok)return; const stats=await s.json(),ordersAdmin=await o.json(); document.getElementById("admin-stats").innerHTML=[[`Utilisateurs`,stats.users], [`Livreurs`,stats.drivers], [`Commandes`,stats.orders], [`CA livré`,`${Number(stats.financials?.total||0).toFixed(2)} DT`]].map(x=>`<div style="background:#fff;border:1px solid rgba(36,28,16,.08);border-radius:14px;padding:14px"><small style="color:#857a67">${x[0]}</small><strong style="display:block;font-size:22px">${x[1]}</strong></div>`).join(""); document.getElementById("admin-orders").innerHTML=ordersAdmin.slice(0,20).map(o=>`<article class="order-card"><div class="order-card-head"><span>#${String(o.id).slice(-5)}</span><span class="order-status">${STATUS_LABELS[o.status]||o.status}</span></div><p>${o.pickup} → ${o.dropoff}</p><p class="fee-line">${Number(o.fee||0).toFixed(2)} DT · commission ${Number(o.commission||0).toFixed(2)} DT</p></article>`).join("")||`<p class="empty-state">Aucune commande.</p>`; }
+ensureAdminView();
+const originalOnLoggedIn = onLoggedIn;
+onLoggedIn = function(user,token){ originalOnLoggedIn(user,token); if(user.role==="client")setTimeout(initClientMap,50); if(user.role==="livreur")setTimeout(ensureDriverPanel,50); if(user.role==="admin")setTimeout(refreshAdmin,50); };
 tryRestoreSession();
