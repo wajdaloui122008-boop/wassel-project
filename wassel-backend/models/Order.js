@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const VALID_STATUSES = ["nouvelle", "acceptee", "route", "livree"];
+const VALID_STATUSES = ["nouvelle", "acceptee", "route", "livree", "annulee"];
 
 const locationSchema = new mongoose.Schema(
   {
@@ -29,6 +29,9 @@ const orderSchema = new mongoose.Schema({
   fee: { type: Number, required: true, min: 0 },
   commission: { type: Number, required: true, min: 0 },
   driverEarnings: { type: Number, required: true, min: 0 },
+  cancellationReason: { type: String, trim: true, maxlength: 300, default: "" },
+  cancelledAt: { type: Date, default: null },
+  cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   createdAt: { type: Date, default: Date.now },
 });
 
