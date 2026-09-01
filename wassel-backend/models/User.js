@@ -4,7 +4,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 80 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ["client", "livreur", "taxi", "admin"], required: true },
+  role: { type: String, enum: ["client", "livreur", "taxi"], required: true },
   country: { type: String, default: "TN", maxlength: 2 },
   phone: { type: String, default: "", maxlength: 30 },
   isOnline: { type: Boolean, default: false },
