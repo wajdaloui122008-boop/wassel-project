@@ -9,10 +9,10 @@ const User = require("./models/User");
 const { requireAuth, requireRole, JWT_SECRET } = require("./middleware/auth");
 
 const app = express();
+app.disable("x-powered-by");
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "32kb" }));
 
-// ---------- Database connection ----------
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/wassel";
 
 mongoose
@@ -27,6 +27,9 @@ const VALID_TRANSITIONS = {
   livree: [],
 };
 
+const VALID_ROLES = ["client", "livreur", "taxi"];
+const VALID_PAYMENT_METHODS = ["especes", "carte", "wallet"];
+
 function signToken(user) {
   return jwt.sign(
     { id: user._id.toString(), role: user.role, name: user.name },
@@ -35,51 +38,70 @@ function signToken(user) {
   );
 }
 
-// ================= AUTH =================
+function cleanString(value, maxLength) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
 
-// POST /auth/register -> create a client or livreur account
+// ================= HEALTH =================
+app.get("/health", (req, res) => {
+  res.json({ ok: true, service: "wassel-backend" });
+});
+
+// ================= AUTH =================
 app.post("/auth/register", async (req, res) => {
   try {
-    const { name, email, password, role, country, phone } = req.body;
+    const name = cleanString(req.body.name, 80);
+    const email = cleanString(req.body.email, 160).toLowerCase();
+    const password = typeof req.body.password === "string" ? req.body.password : "";
+    const role = cleanString(req.body.role, 20);
+    const country = cleanString(req.body.country, 2).toUpperCase() || "TN";
+    const phone = cleanString(req.body.phone, 30);
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: "name, email, password et role sont requis" });
     }
-    if (!["client", "livreur", "taxi"].includes(role)) {
+    if (name.length < 2) {
+      return res.status(400).json({ error: "Le nom est trop court" });
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ error: "Email invalide" });
+    }
+    if (password.length < 6 || password.length > 128) {
+      return res.status(400).json({ error: "Le mot de passe doit contenir entre 6 et 128 caractères" });
+    }
+    if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: "role doit être 'client', 'livreur' ou 'taxi'" });
     }
 
-    const existing = await User.findOne({ email: email.toLowerCase() });
+    const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ error: "Un compte existe déjà avec cet email" });
     }
 
-    const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({
-      name,
-      email,
-      password: hashed,
-      role,
-      country: country || "TN",
-      phone: phone || "",
-    });
-
+    const hashed = await bcrypt.hash(password, 12);
+    const user = await User.create({ name, email, password: hashed, role, country, phone });
     const token = signToken(user);
+
     res.status(201).json({ token, user });
   } catch (err) {
+    if (err?.code === 11000) {
+      return res.status(409).json({ error: "Un compte existe déjà avec cet email" });
+    }
+    console.error("Register error:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
-// POST /auth/login -> authenticate and get a token
 app.post("/auth/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = cleanString(req.body.email, 160).toLowerCase();
+    const password = typeof req.body.password === "string" ? req.body.password : "";
+
     if (!email || !password) {
       return res.status(400).json({ error: "email et password sont requis" });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     }
@@ -89,25 +111,24 @@ app.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     }
 
-    const token = signToken(user);
-    res.json({ token, user });
+    res.json({ token: signToken(user), user });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+app.get("/auth/me", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: "Utilisateur introuvable" });
+    res.json({ user });
   } catch (err) {
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
-// GET /auth/me -> whoami, used by the frontend to restore a session
-app.get("/auth/me", requireAuth, async (req, res) => {
-  const user = await User.findById(req.user.id);
-  if (!user) return res.status(404).json({ error: "Utilisateur introuvable" });
-  res.json({ user });
-});
-
 // ================= ORDERS =================
-
-// GET /orders
-// - clients see only their own orders
-// - livreurs see: unassigned orders ("nouvelle") + orders they've accepted
 app.get("/orders", requireAuth, async (req, res) => {
   try {
     let filter;
@@ -116,22 +137,29 @@ app.get("/orders", requireAuth, async (req, res) => {
     } else if (req.user.role === "livreur") {
       filter = { $or: [{ status: "nouvelle" }, { livreur: req.user.id }] };
     } else {
-      // taxi accounts: ride-hailing isn't built yet, no parcel orders to show
       return res.json([]);
     }
+
     const orders = await Order.find(filter).sort({ createdAt: -1 });
     res.json(orders);
   } catch (err) {
+    console.error("Get orders error:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
-// POST /orders -> a client creates a new order
 app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
   try {
-    const { pickup, dropoff, pkg, paymentMethod } = req.body;
+    const pickup = cleanString(req.body.pickup, 250);
+    const dropoff = cleanString(req.body.dropoff, 250);
+    const pkg = cleanString(req.body.pkg, 500);
+    const paymentMethod = cleanString(req.body.paymentMethod, 20) || "especes";
+
     if (!pickup || !dropoff || !pkg) {
       return res.status(400).json({ error: "pickup, dropoff et pkg sont requis" });
+    }
+    if (!VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+      return res.status(400).json({ error: "Méthode de paiement invalide" });
     }
 
     const order = await Order.create({
@@ -139,52 +167,61 @@ app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
       dropoff,
       pkg,
       client: req.user.id,
-      paymentMethod: paymentMethod || "especes",
+      paymentMethod,
     });
+
     res.status(201).json(order);
   } catch (err) {
+    console.error("Create order error:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
-// PATCH /orders/:id/status -> a livreur accepts/advances an order
+// Atomic status update prevents two livreurs from accepting the same order.
 app.patch("/orders/:id/status", requireAuth, requireRole("livreur"), async (req, res) => {
   try {
     const { status } = req.body;
-    const order = await Order.findById(req.params.id);
 
-    if (!order) {
-      return res.status(404).json({ error: "Commande introuvable" });
+    if (!Object.prototype.hasOwnProperty.call(VALID_TRANSITIONS, status) && status !== "acceptee") {
+      return res.status(400).json({ error: "Statut invalide" });
     }
 
-    // Accepting: order must be unassigned; assign this livreur to it
     if (status === "acceptee") {
-      if (order.status !== "nouvelle") {
-        return res.status(400).json({ error: "Commande déjà prise en charge" });
+      const order = await Order.findOneAndUpdate(
+        { _id: req.params.id, status: "nouvelle", livreur: null },
+        { $set: { status: "acceptee", livreur: req.user.id } },
+        { new: true, runValidators: true }
+      );
+
+      if (!order) {
+        return res.status(409).json({ error: "Commande déjà prise en charge ou introuvable" });
       }
-      order.livreur = req.user.id;
-    } else {
-      // Any further transition must belong to this livreur
-      if (!order.livreur || order.livreur.toString() !== req.user.id) {
-        return res.status(403).json({ error: "Cette commande ne vous est pas assignée" });
-      }
-      const allowed = VALID_TRANSITIONS[order.status] || [];
-      if (!allowed.includes(status)) {
-        return res.status(400).json({
-          error: `Transition invalide: ${order.status} -> ${status}`,
-        });
-      }
+      return res.json(order);
+    }
+
+    const order = await Order.findOne({ _id: req.params.id, livreur: req.user.id });
+    if (!order) {
+      return res.status(404).json({ error: "Commande introuvable ou non assignée" });
+    }
+
+    const allowed = VALID_TRANSITIONS[order.status] || [];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: `Transition invalide: ${order.status} -> ${status}` });
     }
 
     order.status = status;
     await order.save();
     res.json(order);
   } catch (err) {
+    if (err?.name === "CastError") {
+      return res.status(400).json({ error: "Identifiant de commande invalide" });
+    }
+    console.error("Update order error:", err);
     res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Wassel API en écoute sur http://localhost:${PORT}`);
+  console.log(`Wassel API en écoute sur le port ${PORT}`);
 });
