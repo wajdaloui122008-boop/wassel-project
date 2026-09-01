@@ -30,6 +30,9 @@ const MIN_FEE = Number(process.env.MIN_FEE_TND || 5);
 const COMMISSION_RATE = Number(process.env.COMMISSION_RATE || 0.15);
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_MAX_ATTEMPTS = 20;
+const MAX_PAGE_SIZE = 50;
+const DRIVER_DISPATCH_LIMIT = 30;
+const DRIVER_DISPATCH_RADIUS_KM = 20;
 const authAttempts = new Map();
 let dbReady = false;
 
@@ -39,6 +42,14 @@ mongoose
   .connect(MONGODB_URI)
   .catch((err) => console.error("Erreur de connexion à MongoDB:", err.message));
 
+function cleanString(value, maxLength) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+function parsePagination(req) {
+  const page = Math.max(1, Number.parseInt(req.query.page || "1", 10) || 1);
+  const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number.parseInt(req.query.limit || "20", 10) || 20));
+  return { page, limit, skip: (page - 1) * limit };
+}
 function authRateLimit(req, res, next) {
   const key = `${req.ip || "unknown"}:${cleanString(req.body?.email, 160).toLowerCase() || "no-email"}`;
   const now = Date.now();
@@ -55,12 +66,9 @@ function authRateLimit(req, res, next) {
   }
   return next();
 }
-
 setInterval(() => {
   const cutoff = Date.now() - AUTH_WINDOW_MS;
-  for (const [key, value] of authAttempts) {
-    if (value.startedAt < cutoff) authAttempts.delete(key);
-  }
+  for (const [key, value] of authAttempts) if (value.startedAt < cutoff) authAttempts.delete(key);
 }, AUTH_WINDOW_MS).unref();
 
 const VALID_TRANSITIONS = {
@@ -75,14 +83,7 @@ const VALID_PAYMENT_METHODS = ["especes", "carte", "wallet"];
 const VALID_SERVICE_TYPES = ["colis", "food", "taxi", "shop", "market"];
 
 function signToken(user) {
-  return jwt.sign(
-    { id: user._id.toString(), role: user.role, name: user.name },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-}
-function cleanString(value, maxLength) {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+  return jwt.sign({ id: user._id.toString(), role: user.role, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
 }
 function validCoordinatePair(value) {
   return value && Number.isFinite(Number(value.lat)) && Number.isFinite(Number(value.lng)) &&
@@ -145,8 +146,11 @@ app.post("/auth/login", authRateLimit, async (req, res) => {
 });
 
 app.get("/auth/me", requireAuth, async (req, res) => {
-  try { const user = await User.findById(req.user.id); if (!user) return res.status(404).json({ error: "Utilisateur introuvable" }); res.json({ user }); }
-  catch (err) { res.status(500).json({ error: "Erreur serveur" }); }
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: "Utilisateur introuvable" });
+    res.json({ user });
+  } catch (err) { res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 app.patch("/drivers/me/status", requireAuth, requireRole("livreur"), async (req, res) => {
@@ -167,7 +171,8 @@ app.patch("/drivers/me/location", requireAuth, requireRole("livreur"), async (re
 
 app.get("/drivers/nearby", requireAuth, requireRole("client"), async (req, res) => {
   if (!validCoordinatePair(req.query)) return res.status(400).json({ error: "Coordonnées GPS invalides" });
-  const lat = Number(req.query.lat), lng = Number(req.query.lng), radiusKm = Math.min(Math.max(Number(req.query.radiusKm || 10), 1), 50);
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  const radiusKm = Math.min(Math.max(Number(req.query.radiusKm || 10), 1), 50);
   const staleCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const drivers = await User.find({ role: "livreur", isOnline: true, isAvailable: true, "location.lat": { $exists: true }, "location.lng": { $exists: true }, "location.updatedAt": { $gte: staleCutoff } }).select("name location isOnline isAvailable");
   const result = drivers.map((d) => ({ user: d, distanceKm: haversineKm({ lat, lng }, d.location) })).filter((d) => d.distanceKm <= radiusKm).sort((a, b) => a.distanceKm - b.distanceKm);
@@ -176,12 +181,48 @@ app.get("/drivers/nearby", requireAuth, requireRole("client"), async (req, res) 
 
 app.get("/orders", requireAuth, async (req, res) => {
   try {
+    const { page, limit, skip } = parsePagination(req);
+    const serviceType = cleanString(req.query.serviceType, 20).toLowerCase();
+    if (serviceType && !VALID_SERVICE_TYPES.includes(serviceType)) return res.status(400).json({ error: "Type de service invalide" });
+
     let filter;
     if (req.user.role === "client") filter = { client: req.user.id };
     else if (req.user.role === "livreur") filter = { $or: [{ status: "nouvelle" }, { livreur: req.user.id }] };
     else if (req.user.role === "admin") filter = {};
     else return res.json([]);
-    res.json(await Order.find(filter).sort({ createdAt: -1 }));
+    if (serviceType) filter.serviceType = serviceType;
+
+    let query = Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
+    let totalPromise = Order.countDocuments(filter);
+
+    // Dispatch MVP: when a driver has a fresh GPS position, put nearby new jobs first
+    // instead of dumping the entire queue in arbitrary creation order.
+    if (req.user.role === "livreur") {
+      const driver = await User.findById(req.user.id).select("location isOnline isAvailable");
+      if (driver?.isOnline && driver?.isAvailable && validCoordinatePair(driver.location)) {
+        const [newOrders, assignedOrders] = await Promise.all([
+          Order.find({ status: "nouvelle", ...(serviceType ? { serviceType } : {}) }).sort({ createdAt: -1 }).limit(100),
+          Order.find({ livreur: req.user.id, ...(serviceType ? { serviceType } : {}) }).sort({ createdAt: -1 }).skip(skip).limit(limit),
+        ]);
+        const nearby = newOrders
+          .map((order) => ({ order, distanceKm: order.pickupLocation ? haversineKm(driver.location, order.pickupLocation) : Infinity }))
+          .filter((item) => item.distanceKm <= DRIVER_DISPATCH_RADIUS_KM)
+          .sort((a, b) => a.distanceKm - b.distanceKm)
+          .slice(0, DRIVER_DISPATCH_LIMIT)
+          .map((item) => item.order);
+        const merged = [...nearby, ...assignedOrders.filter((order) => !nearby.some((item) => String(item._id) === String(order._id)))];
+        res.set("X-Total-Count", String(await totalPromise));
+        res.set("X-Page", String(page));
+        res.set("X-Limit", String(limit));
+        return res.json(merged.slice(0, limit));
+      }
+    }
+
+    const [orders, total] = await Promise.all([query, totalPromise]);
+    res.set("X-Total-Count", String(total));
+    res.set("X-Page", String(page));
+    res.set("X-Limit", String(limit));
+    res.json(orders);
   } catch (err) { console.error("Get orders error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
@@ -248,21 +289,45 @@ app.patch("/orders/:id/status", requireAuth, requireRole("livreur"), async (req,
     if (!order) return res.status(404).json({ error: "Commande introuvable ou non assignée" });
     const allowed = VALID_TRANSITIONS[order.status] || [];
     if (!allowed.includes(status)) return res.status(400).json({ error: `Transition invalide: ${order.status} -> ${status}` });
-    order.status = status; await order.save();
+    order.status = status;
+    await order.save();
     if (status === "livree") await User.findByIdAndUpdate(req.user.id, { $set: { isAvailable: true } });
     res.json(order);
   } catch (err) { if (err?.name === "CastError") return res.status(400).json({ error: "Identifiant de commande invalide" }); console.error("Update order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 app.get("/admin/stats", requireAuth, requireRole("admin"), async (req, res) => {
-  const [users, drivers, orders, delivered] = await Promise.all([
-    User.countDocuments(), User.countDocuments({ role: "livreur" }), Order.countDocuments(), Order.countDocuments({ status: "livree" })
-  ]);
-  const revenue = await Order.aggregate([{ $match: { status: "livree" } }, { $group: { _id: null, total: { $sum: "$fee" }, commission: { $sum: "$commission" }, driverEarnings: { $sum: "$driverEarnings" } } }]);
-  res.json({ users, drivers, orders, delivered, financials: revenue[0] || { total: 0, commission: 0, driverEarnings: 0 } });
+  try {
+    const [users, drivers, orders, delivered] = await Promise.all([
+      User.countDocuments(), User.countDocuments({ role: "livreur" }), Order.countDocuments(), Order.countDocuments({ status: "livree" })
+    ]);
+    const revenue = await Order.aggregate([{ $match: { status: "livree" } }, { $group: { _id: null, total: { $sum: "$fee" }, commission: { $sum: "$commission" }, driverEarnings: { $sum: "$driverEarnings" } } }]);
+    res.json({ users, drivers, orders, delivered, financials: revenue[0] || { total: 0, commission: 0, driverEarnings: 0 } });
+  } catch (err) { console.error("Admin stats error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
-app.get("/admin/users", requireAuth, requireRole("admin"), async (req, res) => res.json(await User.find().sort({ createdAt: -1 })));
-app.get("/admin/orders", requireAuth, requireRole("admin"), async (req, res) => res.json(await Order.find().sort({ createdAt: -1 })));
+app.get("/admin/users", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req);
+    const [users, total] = await Promise.all([User.find().sort({ createdAt: -1 }).skip(skip).limit(limit), User.countDocuments()]);
+    res.set("X-Total-Count", String(total));
+    res.json(users);
+  } catch (err) { console.error("Admin users error:", err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+app.get("/admin/orders", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const { page, limit, skip } = parsePagination(req);
+    const [orders, total] = await Promise.all([Order.find().sort({ createdAt: -1 }).skip(skip).limit(limit), Order.countDocuments()]);
+    res.set("X-Total-Count", String(total));
+    res.json(orders);
+  } catch (err) { console.error("Admin orders error:", err); res.status(500).json({ error: "Erreur serveur" }); }
+});
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Wassel API en écoute sur le port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Wassel API en écoute sur le port ${PORT}`));
+function shutdown(signal) {
+  console.log(`${signal}: arrêt du serveur...`);
+  server.close(() => mongoose.connection.close(false).finally(() => process.exit(0)));
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
