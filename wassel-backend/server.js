@@ -25,10 +25,11 @@ mongoose
   .catch((err) => console.error("Erreur de connexion à MongoDB:", err.message));
 
 const VALID_TRANSITIONS = {
-  nouvelle: ["acceptee"],
-  acceptee: ["route"],
+  nouvelle: ["acceptee", "annulee"],
+  acceptee: ["route", "annulee"],
   route: ["livree"],
   livree: [],
+  annulee: [],
 };
 const VALID_ROLES = ["client", "livreur", "taxi"];
 const VALID_PAYMENT_METHODS = ["especes", "carte", "wallet"];
@@ -153,9 +154,40 @@ app.post("/orders", requireAuth, requireRole("client"), async (req, res) => {
     const dropoffLocation = { lat: Number(req.body.dropoffLocation.lat), lng: Number(req.body.dropoffLocation.lng) };
     const distanceKm = Math.round(haversineKm(pickupLocation, dropoffLocation) * 100) / 100;
     const pricing = calculatePricing(distanceKm);
-    const order = await Order.create({ pickup, dropoff, pickupLocation, dropoffLocation, distanceKm, pkg, client: req.user.id, paymentMethod, ...pricing });
+    const estimatedDurationMin = Math.max(5, Math.round(distanceKm * 3));
+    const order = await Order.create({ pickup, dropoff, pickupLocation, dropoffLocation, distanceKm, estimatedDurationMin, pkg, client: req.user.id, paymentMethod, ...pricing });
     res.status(201).json(order);
   } catch (err) { console.error("Create order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+app.get("/orders/:id/tracking", requireAuth, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate("livreur", "name phone location isOnline isAvailable");
+    if (!order) return res.status(404).json({ error: "Commande introuvable" });
+    const allowed = req.user.role === "admin" || String(order.client) === req.user.id || (order.livreur && String(order.livreur._id) === req.user.id);
+    if (!allowed) return res.status(403).json({ error: "Accès interdit" });
+    res.json({ id: order.id, status: order.status, pickupLocation: order.pickupLocation || null, dropoffLocation: order.dropoffLocation || null, distanceKm: order.distanceKm, estimatedDurationMin: order.estimatedDurationMin, driver: order.livreur || null });
+  } catch (err) { if (err?.name === "CastError") return res.status(400).json({ error: "Identifiant de commande invalide" }); console.error("Tracking error:", err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+app.post("/orders/:id/cancel", requireAuth, async (req, res) => {
+  try {
+    const reason = cleanString(req.body.reason, 300) || "Annulée par l'utilisateur";
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: "Commande introuvable" });
+    const isClient = req.user.role === "client" && String(order.client) === req.user.id;
+    const isDriver = req.user.role === "livreur" && order.livreur && String(order.livreur) === req.user.id;
+    if (!isClient && !isDriver && req.user.role !== "admin") return res.status(403).json({ error: "Accès interdit" });
+    const canCancel = req.user.role === "admin" || (isClient && ["nouvelle", "acceptee"].includes(order.status)) || (isDriver && order.status === "acceptee");
+    if (!canCancel) return res.status(409).json({ error: "Cette commande ne peut plus être annulée" });
+    order.status = "annulee";
+    order.cancellationReason = reason;
+    order.cancelledAt = new Date();
+    order.cancelledBy = req.user.id;
+    await order.save();
+    if (isDriver) await User.findByIdAndUpdate(req.user.id, { $set: { isAvailable: true } });
+    res.json(order);
+  } catch (err) { if (err?.name === "CastError") return res.status(400).json({ error: "Identifiant de commande invalide" }); console.error("Cancel order error:", err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 app.patch("/orders/:id/status", requireAuth, requireRole("livreur"), async (req, res) => {
