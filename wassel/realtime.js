@@ -4,6 +4,7 @@
   let token = localStorage.getItem("velto_token") || null;
   let watched = new Set();
   let refreshTimer = null;
+  let syncInFlight = false;
   const lastStatus = new Map();
   const notifiedOffers = new Set();
 
@@ -29,12 +30,18 @@
   }
 
   async function syncSubscriptions() {
-    if (!socket?.connected || !token) return;
-    const orders = await getActiveOrders();
-    const next = new Set(orders.map((o) => String(o.id || o._id)).filter(Boolean));
-    for (const id of next) if (!watched.has(id)) socket.emit("order:watch", id);
-    for (const id of watched) if (!next.has(id)) socket.emit("order:unwatch", id);
-    watched = next;
+    if (!socket?.connected || !token || syncInFlight) return;
+    syncInFlight = true;
+    try {
+      const orders = await getActiveOrders();
+      if (!socket?.connected || !token) return;
+      const next = new Set(orders.map((o) => String(o.id || o._id)).filter(Boolean));
+      for (const id of next) if (!watched.has(id)) socket.emit("order:watch", id);
+      for (const id of watched) if (!next.has(id)) socket.emit("order:unwatch", id);
+      watched = next;
+    } finally {
+      syncInFlight = false;
+    }
   }
 
   function watchOrder(orderId) {
@@ -83,7 +90,8 @@
     if (id && notifiedOffers.has(id)) return;
     if (id) notifiedOffers.add(id);
     const order = offer?.order || {};
-    notify("Nouvelle course taxi", `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || Date.now()}`);
+    const label = order.serviceType === "taxi" ? "Nouvelle course taxi" : "Nouvelle course livreur";
+    notify(label, `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || Date.now()}`);
     window.dispatchEvent(new CustomEvent("velto:realtime-offer", { detail: offer }));
   }
 
