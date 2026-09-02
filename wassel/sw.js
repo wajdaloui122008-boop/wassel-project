@@ -1,4 +1,4 @@
-const CACHE = "velto-shell-v4";
+const CACHE = "velto-shell-v5";
 const SHELL = [
   "/", "/index.html", "/style.css", "/script.js", "/tracking.js",
   "/dashboard2.js", "/driver-map.js", "/services.js", "/client-enhancements.js",
