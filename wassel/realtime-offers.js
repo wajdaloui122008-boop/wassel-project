@@ -3,7 +3,7 @@
   const token = () => localStorage.getItem("velto_token") || "";
   const headers = () => token() ? { Authorization: `Bearer ${token()}` } : {};
   const esc = (v) => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const typeInfo = { colis:["📦","Colis"], food:["🍔","Food"], taxi:["🚗","Taxi"], shop:["🛍️","Shop"], market:["🛒","Market"] };
+  const typeInfo = { colis:["📦","Colis"], food:["🍔","Food"], taxi:["🚕","Taxi"], shop:["🛍️","Shop"], market:["🛒","Market"] };
   const $ = (s) => document.querySelector(s);
 
   function toast(message) {
@@ -16,37 +16,30 @@
 
   async function handle(action, id, card) {
     const buttons = card.querySelectorAll("button"); buttons.forEach(b => b.disabled = true);
-    const options = action === "accept"
-      ? { method:"PATCH", headers:{"Content-Type":"application/json",...headers()}, body:JSON.stringify({status:"acceptee"}) }
-      : { method:"POST", headers:headers() };
+    const options = action === "accept" ? { method:"PATCH", headers:{"Content-Type":"application/json",...headers()}, body:JSON.stringify({status:"acceptee"}) } : { method:"POST", headers:headers() };
     const url = action === "accept" ? `${API}/orders/${id}/status` : `${API}/drivers/me/offers/${id}/decline`;
     try {
       const res = await fetch(url, options); const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Offre indisponible");
-      toast(action === "accept" ? "✓ Course acceptée" : "Offre refusée");
-      card.remove();
-      if (window.__veltoRefreshDriverOffers) window.__veltoRefreshDriverOffers();
-    } catch (err) {
-      toast(err.message || "Erreur"); buttons.forEach(b => b.disabled = false);
-    }
+      toast(action === "accept" ? "✓ Course acceptée" : "Offre refusée"); card.remove(); window.__veltoRefreshDriverOffers?.();
+    } catch (err) { toast(err.message || "Erreur"); buttons.forEach(b => b.disabled = false); }
   }
 
   function show(payload) {
     const user = window.__veltoUser;
-    if (user?.role && user.role !== "livreur") return;
-    const host = $("#d2offerList"); if (!host || !payload?.order?.id) return;
-    const o = payload.order, of = payload.offer || {}, id = String(o.id), selector = `.d2offer[data-offer-id="${CSS.escape(id)}"]`;
-    if (host.querySelector(selector)) return;
-    const iconName = typeInfo[o.serviceType] || typeInfo.colis;
-    const exp = new Date(of.expiresAt).getTime();
-    const card = document.createElement("article"); card.className = "d2offer"; card.dataset.offerId = id;
-    card.innerHTML = `<div class="d2offerhead"><div><span class="d2type">${iconName[0]} ${iconName[1]}</span> <b>#${esc(id.slice(-5))}</b></div><span class="d2countdown">--</span></div><div class="d2offerroute"><b>📍 ${esc(o.pickup)}</b><br>↓<br><b>🏁 ${esc(o.dropoff)}</b></div><small>${esc(o.pkg)} · <b>${Number(o.fee || 0).toFixed(2)} ${esc(o.currency || "TND")}</b>${Number.isFinite(Number(of.distanceToPickupKm)) ? ` · 📍 ${Number(of.distanceToPickupKm).toFixed(1)} km` : ""}</small><div class="d2offeractions"><button class="d2btn d2primary">✓ Accepter</button><button class="d2btn">Refuser</button></div>`;
+    if (user?.role && !["livreur", "taxi"].includes(user.role)) return;
+    const host = $("#d2offerList") || $("#taxi-offers");
+    if (!host || !payload?.order) return;
+    const o = payload.order, of = payload.offer || {}, id = String(o.id || payload.orderId || "");
+    if (!id || host.querySelector(`[data-offer-id="${CSS.escape(id)}"]`)) return;
+    const info = typeInfo[o.serviceType] || typeInfo.colis;
+    const exp = new Date(of.expiresAt || payload.expiresAt).getTime();
+    const card = document.createElement("article"); card.className = "order-card"; card.dataset.offerId = id;
+    card.innerHTML = `<div class="order-card-head"><span>${info[0]} ${info[1]} · #${esc(id.slice(-5))}</span><span class="d2countdown">--</span></div><p>📍 ${esc(o.pickup || payload.pickup)}</p><p>🏁 ${esc(o.dropoff || payload.dropoff)}</p><p>💰 ${Number(o.fee || 0).toFixed(2)} ${esc(o.currency || "TND")} · 📍 ${Number(of.distanceToPickupKm ?? payload.distanceToPickupKm ?? 0).toFixed(1)} km</p><div class="order-actions"><button class="accent">✓ Accepter</button><button>Refuser</button></div>`;
     const bs = card.querySelectorAll("button"); bs[0].onclick = () => handle("accept", id, card); bs[1].onclick = () => handle("decline", id, card);
     host.prepend(card); toast("🔔 Nouvelle course disponible");
-    if ("Notification" in window && Notification.permission === "granted") { try { new Notification("Velto — nouvelle course", { body: `${iconName[1]} · ${of.distanceToPickupKm ?? "—"} km du retrait` }); } catch {} }
-    const count = $("#d2offerCount"); if (count) count.textContent = String(host.querySelectorAll(".d2offer").length);
-    const timer = setInterval(() => { const sec = Math.max(0, Math.ceil((exp - Date.now()) / 1000)); const el = card.querySelector(".d2countdown"); if (el) el.textContent = sec + "s"; if (sec <= 0 || !document.body.contains(card)) { clearInterval(timer); if (document.body.contains(card)) card.remove(); } }, 500);
+    const timer = setInterval(() => { const sec = Math.max(0, Math.ceil((exp-Date.now())/1000)); const el=card.querySelector(".d2countdown"); if(el) el.textContent=sec+"s"; if(sec<=0||!document.body.contains(card)) { clearInterval(timer); if(document.body.contains(card)) card.remove(); } },500);
   }
-
+  window.addEventListener("velto:auth", e => { window.__veltoUser = e.detail?.user || window.__veltoUser; });
   window.addEventListener("velto:realtime-offer", e => show(e.detail));
 })();
