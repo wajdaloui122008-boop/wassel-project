@@ -38,11 +38,11 @@ orderSchema.index({ client: 1, createdAt: -1 });
 orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "dispatchOffers.driver": 1, "dispatchOffers.status": 1, "dispatchOffers.expiresAt": 1 });
-// A driver must never have two concurrent active deliveries. The partial unique index
-// also closes the race where two accept requests arrive at the same time.
+// A driver must never have two concurrent active deliveries. Keep an explicit name
+// so MongoDB/Mongoose can distinguish this constraint from the legacy livreur_1 index.
 orderSchema.index(
   { livreur: 1 },
-  { unique: true, partialFilterExpression: { status: { $in: ["acceptee", "route"] }, livreur: { $type: "objectId" } } },
+  { name: "active_livreur_unique", unique: true, partialFilterExpression: { status: { $in: ["acceptee", "route"] }, livreur: { $type: "objectId" } } },
 );
 // Mongoose 9: middleware no longer receives callback-style `next` here.
 orderSchema.pre("save", function () {
