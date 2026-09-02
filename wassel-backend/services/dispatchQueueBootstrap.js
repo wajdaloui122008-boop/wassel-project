@@ -31,6 +31,23 @@ function driverMatchesService(driver, serviceType) {
   return !Array.isArray(driver.capabilities) || driver.capabilities.length === 0 || driver.capabilities.includes(serviceType);
 }
 
+async function cleanupDriverOffers() {
+  const [unavailableDrivers, activeOrders] = await Promise.all([
+    User.find({ role: { $in: ["livreur", "taxi"] }, $or: [{ isOnline: false }, { isAvailable: false }] }).select("_id").lean(),
+    Order.find({ status: { $in: ["acceptee", "route"] }, livreur: { $ne: null } }).select("livreur").lean(),
+  ]);
+  const blockedDriverIds = [...new Set([
+    ...unavailableDrivers.map((driver) => String(driver._id)),
+    ...activeOrders.map((order) => String(order.livreur)),
+  ])];
+  if (!blockedDriverIds.length) return;
+  await Order.updateMany(
+    { status: "nouvelle", "dispatchOffers.status": "offered", "dispatchOffers.driver": { $in: blockedDriverIds } },
+    { $set: { "dispatchOffers.$[offer].status": "cancelled", "dispatchOffers.$[offer].respondedAt": new Date() } },
+    { arrayFilters: [{ "offer.status": "offered", "offer.driver": { $in: blockedDriverIds } }] },
+  );
+}
+
 async function redispatchOrder(order) {
   const now = new Date();
   if (order.livreur || order.status !== "nouvelle") return false;
@@ -75,11 +92,19 @@ async function redispatchOrder(order) {
   return Boolean(updated);
 }
 
+let tickInFlight = false;
 async function processRedispatch() {
-  if (mongoose.connection.readyState !== 1) return;
-  const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
-  for (const order of orders) {
-    try { await redispatchOrder(order); } catch (error) { console.error("Dispatch redispatch error:", error.message); }
+  if (tickInFlight || mongoose.connection.readyState !== 1) return;
+  tickInFlight = true;
+  try {
+    await cleanupDriverOffers();
+    const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
+    for (const order of orders) {
+      if (mongoose.connection.readyState !== 1) break;
+      try { await redispatchOrder(order); } catch (error) { console.error("Dispatch redispatch error:", error.message); }
+    }
+  } finally {
+    tickInFlight = false;
   }
 }
 
