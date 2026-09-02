@@ -48,7 +48,7 @@ async function redispatchOrder(order) {
     "location.updatedAt": { $gte: staleCutoff }
   }).select("location").limit(100);
 
-  let ranked = drivers
+  const ranked = drivers
     .filter((driver) => !previousDriverIds.has(String(driver._id)))
     .map((driver) => ({
       driver,
@@ -94,8 +94,7 @@ async function processRedispatch() {
   if (mongoose.connection.readyState !== 1) return;
   const orders = await Order.find({
     status: "nouvelle",
-    livreur: null,
-    "dispatchOffers.0": { $exists: true }
+    livreur: null
   }).sort({ createdAt: 1 }).limit(100);
 
   for (const order of orders) {
