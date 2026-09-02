@@ -6,7 +6,8 @@
   let refreshTimer = null;
   let syncInFlight = false;
   const lastStatus = new Map();
-  const notifiedOffers = new Set();
+  const notifiedOffers = new Map();
+  const OFFER_DEDUPE_MS = 120000;
 
   function loadSocketIO() {
     if (window.io) return Promise.resolve();
@@ -87,11 +88,15 @@
 
   function handleOffer(offer) {
     const id = String(offer?.order?.id || offer?.order?._id || offer?.id || "");
+    const now = Date.now();
+    for (const [offerId, seenAt] of notifiedOffers) {
+      if (now - seenAt > OFFER_DEDUPE_MS) notifiedOffers.delete(offerId);
+    }
     if (id && notifiedOffers.has(id)) return;
-    if (id) notifiedOffers.add(id);
+    if (id) notifiedOffers.set(id, now);
     const order = offer?.order || {};
     const label = order.serviceType === "taxi" ? "Nouvelle course taxi" : "Nouvelle course livreur";
-    notify(label, `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || Date.now()}`);
+    notify(label, `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || now}`);
     window.dispatchEvent(new CustomEvent("velto:realtime-offer", { detail: offer }));
   }
 
