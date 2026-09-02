@@ -74,23 +74,31 @@
       try { const b = await geocode(dropoff.value.trim()); const a = currentPickup || await geocode(pickup.value.trim()); currentPickup = a; estimateFare(a,b); } catch {}
     });
 
-    form.addEventListener("submit", async () => {
-      if (currentPickup && pickup.value.startsWith("Ma position (")) {
-        const nativeFetch = window.fetch;
-        const original = nativeFetch;
-        window.fetch = function(url, options) {
-          if (String(url).endsWith("/orders") && options?.body) {
-            try {
-              const body = JSON.parse(options.body);
-              if (body.serviceType === "taxi") body.pickupLocation = currentPickup;
-              options.body = JSON.stringify(body);
-            } catch {}
-          }
-          return original.apply(this, arguments);
-        };
-        setTimeout(() => { window.fetch = original; }, 10000);
-      }
-    }, true);
+    form.addEventListener("submit", () => {
+      if (!currentPickup || !pickup.value.startsWith("Ma position (")) return;
+      const nativeFetch = window.fetch;
+      let restored = false;
+      const restore = () => {
+        if (restored) return;
+        restored = true;
+        if (window.fetch === patchedFetch) window.fetch = nativeFetch;
+      };
+      const patchedFetch = function(url, options) {
+        if (String(url).endsWith("/orders") && options?.body) {
+          try {
+            const body = JSON.parse(options.body);
+            if (body.serviceType === "taxi") {
+              body.pickupLocation = currentPickup;
+              options = { ...options, body: JSON.stringify(body) };
+              restore();
+            }
+          } catch {}
+        }
+        return nativeFetch.apply(this, arguments.length > 1 ? [url, options] : [url]);
+      };
+      window.fetch = patchedFetch;
+      setTimeout(restore, 5000);
+    });
   }
 
   setInterval(enhance, 500);
