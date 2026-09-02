@@ -77,7 +77,7 @@
       setMessage("Paiement envoyé. Confirmation en cours…");
       for(let i=0;i<8;i++){
         await new Promise(r=>setTimeout(r,1000));
-        const r=await fetch(`${API}/payments/${activePayment.id}`,{headers:auth()}); const d=await json(r);
+        const r=await fetch(`${API}/payments/${activePayment._orderId}`,{headers:auth()}); const d=await json(r);
         if(r.ok && d.payment?.status === "paid") { sessionStorage.setItem(`velto_payment_${activePayment._orderId}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
         if(r.ok && d.payment?.status === "failed") throw Error("Le paiement a échoué.");
       }
