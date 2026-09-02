@@ -8,6 +8,8 @@
   let elements = null;
   let activePayment = null;
   let scanInFlight = false;
+  const scanAttempts = new Map();
+  const SCAN_RETRY_COOLDOWN_MS = 20000;
 
   function ensureUi() {
     if (document.getElementById("velto-payment-modal")) return;
@@ -89,13 +91,22 @@
     scanInFlight=true;
     try {
       const r=await fetch(`${API}/orders`,{headers:auth()}); if(!r.ok) return; const data=await json(r); if(!Array.isArray(data)) return;
-      const pending=data.filter(o=>["carte","wallet"].includes(o.paymentMethod)&&o.paymentStatus!=="paid"&&o.status!=="annulee");
-      const candidate=pending.find(o=>sessionStorage.getItem(`velto_payment_${o.id}`)!=="done");
-      if(candidate) await startPayment(candidate);
+      const now=Date.now();
+      for(const [id,at] of scanAttempts) if(now-at>SCAN_RETRY_COOLDOWN_MS) scanAttempts.delete(id);
+      const pending=data
+        .filter(o=>["carte","wallet"].includes(o.paymentMethod)&&o.paymentStatus!=="paid"&&o.status!=="annulee")
+        .sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0));
+      const candidate=pending.find(o=>sessionStorage.getItem(`velto_payment_${o.id}`)!=="done"&&!scanAttempts.has(String(o.id)));
+      if(candidate) {
+        scanAttempts.set(String(candidate.id),now);
+        await startPayment(candidate);
+      }
     } catch {} finally { scanInFlight=false; }
   }
   ensureUi();
   setTimeout(scan,2500);
   setInterval(scan,7000);
+  window.addEventListener("velto:auth",()=>setTimeout(scan,250));
+  window.addEventListener("velto:orders-updated",()=>setTimeout(scan,100));
   window.veltoStartPayment = startPayment;
 })();
