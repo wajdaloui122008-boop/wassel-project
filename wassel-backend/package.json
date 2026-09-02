@@ -4,7 +4,7 @@
   "description": "Backend API pour la plateforme de livraison Wassel",
   "main": "server.js",
   "scripts": {
-    "start": "node -r ./services/dispatchQueueBootstrap.js server.js"
+    "start": "node -r ./services/realtimeBootstrap.js -r ./services/dispatchQueueBootstrap.js server.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -12,6 +12,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.9.4",
+    "socket.io": "^4.8.1",
     "stripe": "^18.5.0"
   }
 }
