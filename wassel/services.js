@@ -10,7 +10,7 @@
     market: { icon:"🛒", title:"Faire mes courses", sub:"Votre liste de courses livrée à domicile.", pickup:"Marché / magasin", detail:"Ex: lait, pain, œufs, fruits...", button:"Commander mes courses" }
   };
   async function geocode(q) {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=tn&q=${encodeURIComponent(q)}`, { headers:{Accept:"application/json"} });
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, { headers:{Accept:"application/json"} });
     const d = await r.json(); if (!d[0]) throw new Error(`Adresse introuvable : ${q}`);
     return { lat:Number(d[0].lat), lng:Number(d[0].lon) };
   }
