@@ -93,24 +93,31 @@ async function redispatchOrder(order) {
 }
 
 let tickInFlight = false;
+let stopping = false;
+
 async function processRedispatch() {
-  if (tickInFlight || mongoose.connection.readyState !== 1) return;
+  if (tickInFlight || stopping || mongoose.connection.readyState !== 1) return;
   tickInFlight = true;
   try {
     await cleanupDriverOffers();
     const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
     for (const order of orders) {
-      if (mongoose.connection.readyState !== 1) break;
-      try { await redispatchOrder(order); } catch (error) { console.error("Dispatch redispatch error:", error.message); }
+      if (stopping || mongoose.connection.readyState !== 1) break;
+      try {
+        await redispatchOrder(order);
+      } catch (error) {
+        if (!stopping && mongoose.connection.readyState === 1) console.error("Dispatch redispatch error:", error.message);
+      }
     }
+  } catch (error) {
+    if (!stopping && mongoose.connection.readyState === 1) console.error("Dispatch queue error:", error.message);
   } finally {
     tickInFlight = false;
   }
 }
 
-let stopping = false;
 const timer = setInterval(() => {
-  if (!stopping) processRedispatch().catch((error) => console.error("Dispatch queue error:", error.message));
+  if (!stopping) processRedispatch();
 }, TICK_MS);
 timer.unref();
 
