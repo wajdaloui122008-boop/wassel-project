@@ -145,6 +145,7 @@
   }
 
   window.addEventListener("velto:auth", () => { if (window.__veltoUser?.role === "taxi") { mount(); syncState(); refreshActiveOrder(); } });
+  window.addEventListener("velto:refresh-taxi-offers", () => refreshOffers());
   window.__veltoUser = window.__veltoUser || null;
   setTimeout(mount, 300);
   timer = setInterval(() => { refreshActiveOrder(); refreshOffers(); }, 2500);
