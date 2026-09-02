@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 
+const VALID_SERVICE_TYPES = ["colis", "food", "taxi", "shop", "market"];
+
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 80 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -7,6 +9,7 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ["client", "livreur", "taxi", "admin"], required: true },
   country: { type: String, default: "TN", maxlength: 2 },
   phone: { type: String, default: "", maxlength: 30 },
+  capabilities: { type: [{ type: String, enum: VALID_SERVICE_TYPES }], default: VALID_SERVICE_TYPES },
   isOnline: { type: Boolean, default: false },
   isAvailable: { type: Boolean, default: false },
   location: {
@@ -18,6 +21,7 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.index({ role: 1, isOnline: 1, isAvailable: 1 });
+userSchema.index({ role: 1, capabilities: 1, isOnline: 1, isAvailable: 1 });
 
 userSchema.set("toJSON", {
   virtuals: true,
