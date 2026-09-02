@@ -5,14 +5,12 @@ const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const { JWT_SECRET } = require("../middleware/auth");
 
-if (!http.__veltoRealtimePatched) {
-  http.__veltoRealtimePatched = true;
-  const originalCreateServer = http.createServer;
-
-  http.createServer = function veltoCreateServer(...args) {
-    const server = originalCreateServer.apply(http, args);
-    attachRealtime(server);
-    return server;
+if (!http.Server.prototype.__veltoRealtimePatched) {
+  http.Server.prototype.__veltoRealtimePatched = true;
+  const originalListen = http.Server.prototype.listen;
+  http.Server.prototype.listen = function veltoListen(...args) {
+    attachRealtime(this);
+    return originalListen.apply(this, args);
   };
 }
 
