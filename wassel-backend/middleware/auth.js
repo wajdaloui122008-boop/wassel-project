@@ -30,7 +30,7 @@ function requireAuth(req, res, next) {
 
 function requireRole(role) {
   return (req, res, next) => {
-    if (req.user.role !== role) {
+    if (req.user.role !== role && !(role === "livreur" && req.user.role === "taxi")) {
       return res.status(403).json({ error: "Accès non autorisé pour ce rôle" });
     }
     next();
