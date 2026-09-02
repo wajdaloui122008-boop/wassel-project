@@ -37,6 +37,13 @@
     watched = next;
   }
 
+  function watchOrder(orderId) {
+    const id = String(orderId || "");
+    if (!id) return;
+    watched.add(id);
+    if (socket?.connected) socket.emit("order:watch", id);
+  }
+
   function connect() {
     if (!window.io || !token) return;
     if (socket) socket.disconnect();
@@ -50,13 +57,15 @@
 
   async function boot() {
     token = localStorage.getItem("velto_token") || null;
-    if (!token) { if (socket) socket.disconnect(); return; }
+    if (!token) { if (socket) socket.disconnect(); watched.clear(); return; }
     try { await loadSocketIO(); connect(); } catch {}
   }
 
+  window.__veltoRealtimeWatchOrder = watchOrder;
   window.addEventListener("storage", (event) => {
     if (event.key === "velto_token") { token = localStorage.getItem("velto_token") || null; boot(); }
   });
+  window.addEventListener("velto:auth", () => boot());
 
   boot();
   if (!refreshTimer) refreshTimer = setInterval(() => {
