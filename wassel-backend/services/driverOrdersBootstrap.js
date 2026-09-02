@@ -1,12 +1,13 @@
 const express = require("express");
 const Order = require("../models/Order");
-const { requireAuth, requireRole } = require("../middleware/auth");
+const { requireAuth } = require("../middleware/auth");
+const { requireDriver } = require("./driverRole");
 
 if (!express.application.__veltoDriverOrdersMounted) {
   express.application.__veltoDriverOrdersMounted = true;
   const originalListen = express.application.listen;
   express.application.listen = function veltoDriverOrdersListen(...args) {
-    this.get("/drivers/me/active-order", requireAuth, requireRole("livreur"), async (req, res) => {
+    this.get("/drivers/me/active-order", requireAuth, requireDriver, async (req, res) => {
       try {
         const order = await Order.findOne({
           livreur: req.user.id,
