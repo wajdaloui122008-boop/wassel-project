@@ -104,7 +104,13 @@
     if (!window.io || !token) return;
     if (socket) socket.disconnect();
     socket = window.io(API, { auth: { token }, transports: ["websocket", "polling"] });
-    socket.on("connect", syncSubscriptions);
+    socket.on("connect", () => {
+      watched.clear();
+      syncSubscriptions();
+    });
+    socket.on("disconnect", () => {
+      watched.clear();
+    });
     socket.on("order:snapshot", handleOrder);
     socket.on("order:update", handleOrder);
     socket.on("driver:offer", handleOffer);
