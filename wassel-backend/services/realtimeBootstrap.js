@@ -41,6 +41,9 @@ function attachRealtime(server) {
   });
 
   io.on("connection", (socket) => {
+    const userId = String(socket.user?.id || "");
+    if (userId) socket.join(`user:${userId}`);
+
     socket.on("order:watch", async (orderId) => {
       if (typeof orderId !== "string" || !mongoose.isValidObjectId(orderId)) return;
       try {
@@ -48,7 +51,6 @@ function attachRealtime(server) {
           .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory")
           .populate("livreur", "name location isOnline isAvailable");
         if (!order) return;
-        const userId = String(socket.user?.id || "");
         if (String(order.client || "") !== userId && String(order.livreur?._id || order.livreur || "") !== userId && socket.user?.role !== "admin") return;
         socket.join(`order:${orderId}`);
         socket.emit("order:snapshot", buildSnapshot(order));
@@ -63,6 +65,8 @@ function attachRealtime(server) {
   });
 
   const lastSnapshots = new Map();
+  const sentOffers = new Map();
+
   const tick = async () => {
     if (mongoose.connection.readyState !== 1) return;
     try {
@@ -70,14 +74,51 @@ function attachRealtime(server) {
         .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory")
         .populate("livreur", "name location isOnline isAvailable")
         .lean();
+
       for (const order of active) {
         const snapshot = buildSnapshot(order);
         const key = String(order._id);
         const serialized = JSON.stringify(snapshot);
-        if (lastSnapshots.get(key) === serialized) continue;
-        lastSnapshots.set(key, serialized);
-        io.to(`order:${key}`).emit("order:update", snapshot);
+        if (lastSnapshots.get(key) !== serialized) {
+          lastSnapshots.set(key, serialized);
+          io.to(`order:${key}`).emit("order:update", snapshot);
+        }
       }
+
+      const now = Date.now();
+      const offerOrders = await Order.find({
+        status: "nouvelle",
+        "dispatchOffers.status": "offered",
+        "dispatchOffers.expiresAt": { $gt: new Date() },
+        "dispatchOffers.offeredAt": { $gte: new Date(now - 10000) }
+      }).select("id serviceType pickup dropoff pkg fee currency dispatchOffers").lean();
+
+      for (const order of offerOrders) {
+        for (const offer of order.dispatchOffers || []) {
+          if (offer.status !== "offered" || new Date(offer.expiresAt).getTime() <= now) continue;
+          const offerKey = `${String(order._id)}:${String(offer.driver)}:${new Date(offer.offeredAt).getTime()}`;
+          if (sentOffers.has(offerKey)) continue;
+          sentOffers.set(offerKey, now);
+          io.to(`user:${String(offer.driver)}`).emit("driver:offer", {
+            order: {
+              id: String(order._id),
+              serviceType: order.serviceType,
+              pickup: order.pickup,
+              dropoff: order.dropoff,
+              pkg: order.pkg,
+              fee: order.fee,
+              currency: order.currency,
+            },
+            offer: {
+              distanceToPickupKm: offer.distanceToPickupKm,
+              offeredAt: offer.offeredAt,
+              expiresAt: offer.expiresAt,
+            }
+          });
+        }
+      }
+
+      for (const [key, at] of sentOffers) if (now - at > 60000) sentOffers.delete(key);
       for (const key of lastSnapshots.keys()) {
         if (!active.some((order) => String(order._id) === key)) lastSnapshots.delete(key);
       }
