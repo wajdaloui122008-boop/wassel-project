@@ -8,21 +8,12 @@ const locationSchema = new mongoose.Schema(
   { lat: { type: Number, required: true, min: -90, max: 90 }, lng: { type: Number, required: true, min: -180, max: 180 } },
   { _id: false }
 );
-
 const statusEventSchema = new mongoose.Schema(
   { status: { type: String, enum: VALID_STATUSES, required: true }, at: { type: Date, default: Date.now } },
   { _id: false }
 );
-
 const dispatchOfferSchema = new mongoose.Schema(
-  {
-    driver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    status: { type: String, enum: VALID_OFFER_STATUSES, default: "offered" },
-    distanceToPickupKm: { type: Number, min: 0, default: null },
-    offeredAt: { type: Date, default: Date.now },
-    expiresAt: { type: Date, required: true },
-    respondedAt: { type: Date, default: null },
-  },
+  { driver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, status: { type: String, enum: VALID_OFFER_STATUSES, default: "offered" }, distanceToPickupKm: { type: Number, min: 0, default: null }, offeredAt: { type: Date, default: Date.now }, expiresAt: { type: Date, required: true }, respondedAt: { type: Date, default: null } },
   { _id: false }
 );
 
@@ -42,6 +33,7 @@ const orderSchema = new mongoose.Schema({
   dispatchOffers: { type: [dispatchOfferSchema], default: [] },
   paymentMethod: { type: String, enum: ["especes", "carte", "wallet"], default: "especes" },
   paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
+  currency: { type: String, default: process.env.DEFAULT_CURRENCY || "TND", uppercase: true, minlength: 3, maxlength: 3 },
   transactionId: { type: String, trim: true, maxlength: 200, default: "" },
   fee: { type: Number, required: true, min: 0 },
   commission: { type: Number, required: true, min: 0 },
@@ -56,38 +48,12 @@ orderSchema.index({ client: 1, createdAt: -1 });
 orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "dispatchOffers.driver": 1, "dispatchOffers.status": 1, "dispatchOffers.expiresAt": 1 });
-
 orderSchema.pre("save", function (next) {
-  if (this.isNew && this.status && this.statusHistory.length === 0) {
-    this.statusHistory.push({ status: this.status, at: this.createdAt || new Date() });
-  } else if (this.isModified("status")) {
-    const last = this.statusHistory[this.statusHistory.length - 1];
-    if (!last || last.status !== this.status) this.statusHistory.push({ status: this.status, at: new Date() });
-  }
+  if (this.isNew && this.status && this.statusHistory.length === 0) this.statusHistory.push({ status: this.status, at: this.createdAt || new Date() });
+  else if (this.isModified("status")) { const last = this.statusHistory[this.statusHistory.length - 1]; if (!last || last.status !== this.status) this.statusHistory.push({ status: this.status, at: new Date() }); }
   next();
 });
-
-orderSchema.pre("findOneAndUpdate", function (next) {
-  const update = this.getUpdate() || {};
-  const nextStatus = update.$set?.status ?? update.status;
-  if (VALID_STATUSES.includes(nextStatus)) {
-    const history = update.$push || (update.$push = {});
-    history.statusHistory = { status: nextStatus, at: new Date() };
-  }
-  next();
-});
-
-orderSchema.pre("validate", function (next) {
-  if (this.serviceType === "colis" && typeof this.pkg === "string") {
-    const match = this.pkg.match(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]/i);
-    if (match) this.serviceType = match[1].toLowerCase();
-  }
-  next();
-});
-
-orderSchema.set("toJSON", {
-  virtuals: true,
-  transform: (doc, ret) => { delete ret._id; delete ret.__v; },
-});
-
+orderSchema.pre("findOneAndUpdate", function (next) { const update = this.getUpdate() || {}; const nextStatus = update.$set?.status ?? update.status; if (VALID_STATUSES.includes(nextStatus)) { const history = update.$push || (update.$push = {}); history.statusHistory = { status: nextStatus, at: new Date() }; } next(); });
+orderSchema.pre("validate", function (next) { if (this.serviceType === "colis" && typeof this.pkg === "string") { const match = this.pkg.match(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]/i); if (match) this.serviceType = match[1].toLowerCase(); } next(); });
+orderSchema.set("toJSON", { virtuals: true, transform: (doc, ret) => { delete ret._id; delete ret.__v; } });
 module.exports = mongoose.model("Order", orderSchema);
