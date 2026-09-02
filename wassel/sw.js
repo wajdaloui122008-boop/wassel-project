@@ -1,4 +1,4 @@
-const CACHE = "velto-shell-v8";
+const CACHE = "velto-shell-v9";
 const ASSETS = [
   "/",
   "/index.html",
