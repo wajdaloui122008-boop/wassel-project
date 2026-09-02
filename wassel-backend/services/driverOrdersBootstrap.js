@@ -2,6 +2,29 @@ const express = require("express");
 const Order = require("../models/Order");
 const { requireAuth } = require("../middleware/auth");
 const { requireDriver } = require("./driverRole");
+const User = require("../models/User");
+
+// Older livreur accounts may have been created before the capabilities field
+// existed. Keep dispatch compatible with those accounts instead of silently
+// excluding them from every service offer.
+if (!User.__veltoLegacyCapabilitiesPatched) {
+  User.__veltoLegacyCapabilitiesPatched = true;
+  const originalFind = User.find.bind(User);
+  User.find = function veltoDriverFind(conditions, ...args) {
+    if (conditions && typeof conditions === "object" && typeof conditions.capabilities === "string") {
+      const service = conditions.capabilities;
+      const next = { ...conditions };
+      delete next.capabilities;
+      next.$or = [
+        { capabilities: service },
+        { capabilities: { $exists: false } },
+        { capabilities: { $size: 0 } },
+      ];
+      return originalFind(next, ...args);
+    }
+    return originalFind(conditions, ...args);
+  };
+}
 
 if (!express.application.__veltoDriverOrdersMounted) {
   express.application.__veltoDriverOrdersMounted = true;
