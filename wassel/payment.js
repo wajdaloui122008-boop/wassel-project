@@ -38,7 +38,7 @@
     const key = `velto_payment_${order.id}`;
     if (sessionStorage.getItem(key) === "done") return;
     open();
-    activePayment = order;
+    activePayment = {...order, _orderId:String(order.id)};
     setError("");
     const mount=document.getElementById("velto-payment-element"); if(mount) mount.innerHTML="";
     document.getElementById("velto-payment-summary").textContent = `Commande #${String(order.id).slice(-5)} · ${amountText(order)}`;
@@ -76,7 +76,7 @@
       for(let i=0;i<8;i++){
         await new Promise(r=>setTimeout(r,1000));
         const r=await fetch(`${API}/payments/${activePayment.id}`,{headers:auth()}); const d=await json(r);
-        if(r.ok && d.payment?.status === "paid") { sessionStorage.setItem(`velto_payment_${activePayment.orderId || activePayment.id}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
+        if(r.ok && d.payment?.status === "paid") { sessionStorage.setItem(`velto_payment_${activePayment._orderId}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
         if(r.ok && d.payment?.status === "failed") throw Error("Le paiement a échoué.");
       }
       setMessage("Paiement envoyé. La confirmation finale arrivera après le webhook du fournisseur.");
