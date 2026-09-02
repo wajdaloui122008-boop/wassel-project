@@ -5,6 +5,7 @@
   const labels = { nouvelle: "Nouvelle", acceptee: "Acceptée", route: "En route", livree: "Livrée", annulee: "Annulée" };
   const serviceLabels = { colis: "📦 Colis", food: "🍔 Food", taxi: "🚗 Taxi", shop: "🛍️ Shop", market: "🛒 Market" };
   const paymentLabels = { especes: "Espèces", carte: "Carte", wallet: "Wallet" };
+  let refreshInFlight = false;
 
   async function api(path, options = {}) {
     const t = token();
@@ -68,7 +69,8 @@
 
   async function refresh() {
     const container = document.getElementById("client-orders");
-    if (!container || !token()) return;
+    if (!container || !token() || refreshInFlight) return;
+    refreshInFlight = true;
     try {
       const orders = await api("/orders");
       if (!Array.isArray(orders)) return;
@@ -80,6 +82,8 @@
       orders.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).forEach((order) => container.appendChild(renderOrder(order)));
     } catch (err) {
       console.warn("Velto client history:", err.message);
+    } finally {
+      refreshInFlight = false;
     }
   }
 
