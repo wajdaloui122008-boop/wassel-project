@@ -4,6 +4,8 @@
   let token = localStorage.getItem("velto_token") || null;
   let watched = new Set();
   let refreshTimer = null;
+  const lastStatus = new Map();
+  const notifiedOffers = new Set();
 
   function loadSocketIO() {
     if (window.io) return Promise.resolve();
@@ -23,9 +25,7 @@
       if (!res.ok) return [];
       const orders = await res.json();
       return Array.isArray(orders) ? orders.filter((o) => ["nouvelle", "acceptee", "route"].includes(o.status)) : [];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
   async function syncSubscriptions() {
@@ -44,21 +44,64 @@
     if (socket?.connected) socket.emit("order:watch", id);
   }
 
+  function notify(title, body, tag) {
+    try {
+      if (document.visibilityState === "visible" && !document.hidden) {
+        let box = document.getElementById("velto-live-toast");
+        if (!box) { box = document.createElement("div"); box.id = "velto-live-toast"; box.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:100000;max-width:360px;padding:14px 16px;border-radius:16px;background:#211d18;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.25);font:600 13px Inter,Arial"; document.body.appendChild(box); }
+        box.innerHTML = `<strong>${escapeHtml(title)}</strong><div style="margin-top:4px;opacity:.82;font-weight:500">${escapeHtml(body)}</div>`;
+        clearTimeout(box._timer); box._timer = setTimeout(() => box.remove(), 4500);
+      }
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification(title, { body, tag });
+    } catch {}
+  }
+
+  function escapeHtml(v) { return String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+  async function requestNotifications() {
+    if (typeof Notification === "undefined" || Notification.permission !== "default") return;
+    try { await Notification.requestPermission(); } catch {}
+  }
+
+  function handleOrder(snapshot) {
+    if (!snapshot) return;
+    const id = String(snapshot.id || snapshot._id || "");
+    const status = snapshot.status;
+    if (id && status) {
+      const previous = lastStatus.get(id);
+      lastStatus.set(id, status);
+      if (previous && previous !== status) {
+        const labels = { acceptee: "Course acceptée", route: "Course en route", livree: "Course terminée", annulee: "Course annulée" };
+        notify(labels[status] || "Commande mise à jour", `Statut : ${status}`, `order-${id}-${status}`);
+      }
+    }
+    window.dispatchEvent(new CustomEvent("velto:realtime-order", { detail: snapshot }));
+  }
+
+  function handleOffer(offer) {
+    const id = String(offer?.order?.id || offer?.order?._id || offer?.id || "");
+    if (id && notifiedOffers.has(id)) return;
+    if (id) notifiedOffers.add(id);
+    const order = offer?.order || {};
+    notify("Nouvelle course taxi", `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || Date.now()}`);
+    window.dispatchEvent(new CustomEvent("velto:realtime-offer", { detail: offer }));
+  }
+
   function connect() {
     if (!window.io || !token) return;
     if (socket) socket.disconnect();
     socket = window.io(API, { auth: { token }, transports: ["websocket", "polling"] });
     socket.on("connect", syncSubscriptions);
-    socket.on("order:snapshot", (snapshot) => window.dispatchEvent(new CustomEvent("velto:realtime-order", { detail: snapshot })));
-    socket.on("order:update", (snapshot) => window.dispatchEvent(new CustomEvent("velto:realtime-order", { detail: snapshot })));
-    socket.on("driver:offer", (offer) => window.dispatchEvent(new CustomEvent("velto:realtime-offer", { detail: offer })));
+    socket.on("order:snapshot", handleOrder);
+    socket.on("order:update", handleOrder);
+    socket.on("driver:offer", handleOffer);
     socket.on("connect_error", () => {});
   }
 
   async function boot() {
     token = localStorage.getItem("velto_token") || null;
     if (!token) { if (socket) socket.disconnect(); watched.clear(); return; }
-    try { await loadSocketIO(); connect(); } catch {}
+    try { await loadSocketIO(); connect(); requestNotifications(); } catch {}
   }
 
   window.__veltoRealtimeWatchOrder = watchOrder;
@@ -66,6 +109,7 @@
     if (event.key === "velto_token") { token = localStorage.getItem("velto_token") || null; boot(); }
   });
   window.addEventListener("velto:auth", () => boot());
+  document.addEventListener("click", requestNotifications, { once: true });
 
   boot();
   if (!refreshTimer) refreshTimer = setInterval(() => {
