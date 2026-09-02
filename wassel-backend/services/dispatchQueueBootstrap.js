@@ -27,7 +27,9 @@ function validLocation(location) {
 
 function driverMatchesService(driver, serviceType) {
   if (serviceType === "taxi") return driver.role === "taxi";
-  return driver.role === "livreur" && Array.isArray(driver.capabilities) && driver.capabilities.includes(serviceType);
+  if (driver.role !== "livreur") return false;
+  // Accounts created before capabilities existed are valid for all delivery services.
+  return !Array.isArray(driver.capabilities) || driver.capabilities.length === 0 || driver.capabilities.includes(serviceType);
 }
 
 async function redispatchOrder(order) {
@@ -41,15 +43,24 @@ async function redispatchOrder(order) {
 
   const staleCutoff = new Date(Date.now() - GPS_MAX_AGE_MS);
   const roleFilter = order.serviceType === "taxi" ? "taxi" : "livreur";
-  const drivers = await User.find({
+  const driverQuery = {
     role: roleFilter,
     isOnline: true,
     isAvailable: true,
-    ...(roleFilter === "livreur" ? { capabilities: order.serviceType } : {}),
     "location.lat": { $exists: true },
     "location.lng": { $exists: true },
-    "location.updatedAt": { $gte: staleCutoff }
-  }).select("location capabilities role").limit(100);
+    "location.updatedAt": { $gte: staleCutoff },
+  };
+  if (roleFilter === "livreur") {
+    // Match capable livreurs plus legacy accounts with no capabilities field.
+    driverQuery.$or = [
+      { capabilities: order.serviceType },
+      { capabilities: { $exists: false } },
+      { capabilities: { $size: 0 } },
+    ];
+  }
+
+  const drivers = await User.find(driverQuery).select("location capabilities role").limit(100);
 
   const ranked = drivers.filter((driver) => driverMatchesService(driver, order.serviceType) && !previousDriverIds.has(String(driver._id)))
     .map((driver) => ({ driver, distanceKm: haversineKm(driver.location, order.pickupLocation) }))
