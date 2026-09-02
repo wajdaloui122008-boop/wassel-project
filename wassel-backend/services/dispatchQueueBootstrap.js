@@ -28,7 +28,6 @@ function validLocation(location) {
 function driverMatchesService(driver, serviceType) {
   if (serviceType === "taxi") return driver.role === "taxi";
   if (driver.role !== "livreur") return false;
-  // Accounts created before capabilities existed are valid for all delivery services.
   return !Array.isArray(driver.capabilities) || driver.capabilities.length === 0 || driver.capabilities.includes(serviceType);
 }
 
@@ -52,7 +51,6 @@ async function redispatchOrder(order) {
     "location.updatedAt": { $gte: staleCutoff },
   };
   if (roleFilter === "livreur") {
-    // Match capable livreurs plus legacy accounts with no capabilities field.
     driverQuery.$or = [
       { capabilities: order.serviceType },
       { capabilities: { $exists: false } },
@@ -61,7 +59,6 @@ async function redispatchOrder(order) {
   }
 
   const drivers = await User.find(driverQuery).select("location capabilities role").limit(100);
-
   const ranked = drivers.filter((driver) => driverMatchesService(driver, order.serviceType) && !previousDriverIds.has(String(driver._id)))
     .map((driver) => ({ driver, distanceKm: haversineKm(driver.location, order.pickupLocation) }))
     .filter((item) => item.distanceKm <= RADIUS_KM).sort((a, b) => a.distanceKm - b.distanceKm)
@@ -86,6 +83,19 @@ async function processRedispatch() {
   }
 }
 
-const timer = setInterval(() => { processRedispatch().catch((error) => console.error("Dispatch queue error:", error.message)); }, TICK_MS);
+let stopping = false;
+const timer = setInterval(() => {
+  if (!stopping) processRedispatch().catch((error) => console.error("Dispatch queue error:", error.message));
+}, TICK_MS);
 timer.unref();
+
+async function stopDispatchWorker() {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(timer);
+}
+
+process.once("SIGTERM", stopDispatchWorker);
+process.once("SIGINT", stopDispatchWorker);
+
 console.log("Dispatch redispatch worker actif");
