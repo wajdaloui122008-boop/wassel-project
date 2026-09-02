@@ -4,18 +4,9 @@ const VALID_STATUSES = ["nouvelle", "acceptee", "route", "livree", "annulee"];
 const VALID_SERVICE_TYPES = ["colis", "food", "taxi", "shop", "market"];
 const VALID_OFFER_STATUSES = ["offered", "declined", "expired", "accepted", "cancelled"];
 
-const locationSchema = new mongoose.Schema(
-  { lat: { type: Number, required: true, min: -90, max: 90 }, lng: { type: Number, required: true, min: -180, max: 180 } },
-  { _id: false }
-);
-const statusEventSchema = new mongoose.Schema(
-  { status: { type: String, enum: VALID_STATUSES, required: true }, at: { type: Date, default: Date.now } },
-  { _id: false }
-);
-const dispatchOfferSchema = new mongoose.Schema(
-  { driver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, status: { type: String, enum: VALID_OFFER_STATUSES, default: "offered" }, distanceToPickupKm: { type: Number, min: 0, default: null }, offeredAt: { type: Date, default: Date.now }, expiresAt: { type: Date, required: true }, respondedAt: { type: Date, default: null } },
-  { _id: false }
-);
+const locationSchema = new mongoose.Schema({ lat: { type: Number, required: true, min: -90, max: 90 }, lng: { type: Number, required: true, min: -180, max: 180 } }, { _id: false });
+const statusEventSchema = new mongoose.Schema({ status: { type: String, enum: VALID_STATUSES, required: true }, at: { type: Date, default: Date.now } }, { _id: false });
+const dispatchOfferSchema = new mongoose.Schema({ driver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, status: { type: String, enum: VALID_OFFER_STATUSES, default: "offered" }, distanceToPickupKm: { type: Number, min: 0, default: null }, offeredAt: { type: Date, default: Date.now }, expiresAt: { type: Date, required: true }, respondedAt: { type: Date, default: null } }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
   serviceType: { type: String, enum: VALID_SERVICE_TYPES, default: "colis", index: true },
@@ -49,7 +40,7 @@ orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "dispatchOffers.driver": 1, "dispatchOffers.status": 1, "dispatchOffers.expiresAt": 1 });
 
-// Mongoose 9-style pre hooks: return/await instead of using the removed callback `next` argument.
+// Mongoose 9: middleware no longer receives the callback-style `next` here.
 orderSchema.pre("save", function () {
   if (this.isNew && this.status && this.statusHistory.length === 0) {
     this.statusHistory.push({ status: this.status, at: this.createdAt || new Date() });
