@@ -8,6 +8,16 @@ const { getPaymentProvider, normalizeCurrency, toMinorUnits } = require("./index
 const router = express.Router();
 function idempotencyKey(req) { const value = req.get("Idempotency-Key") || req.body?.idempotencyKey || ""; return String(value).trim().slice(0, 200) || null; }
 
+// Safe public configuration: never expose a Stripe secret key.
+router.get("/config", (req, res) => {
+  const provider = String(process.env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
+  res.json({
+    provider,
+    configured: provider !== "stripe" || Boolean(process.env.STRIPE_SECRET_KEY),
+    stripePublishableKey: provider === "stripe" ? (process.env.STRIPE_PUBLISHABLE_KEY || null) : null
+  });
+});
+
 router.post("/", requireAuth, requireRole("client"), async (req, res) => {
   try {
     const orderId = String(req.body.orderId || "").trim();
@@ -22,14 +32,14 @@ router.post("/", requireAuth, requireRole("client"), async (req, res) => {
     if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) return res.status(400).json({ error: "Montant de paiement invalide" });
     const key = idempotencyKey(req);
     let payment = key ? await Payment.findOne({ user: req.user.id, idempotencyKey: key }) : null;
-    if (payment) return res.status(200).json({ payment, order });
+    if (payment) return res.status(200).json({ payment, order, clientSecret: payment.metadata?.clientSecret || null });
     payment = await Payment.findOne({ order: order._id });
     if (payment?.status === "paid") return res.status(409).json({ error: "Commande déjà payée" });
     const provider = getPaymentProvider();
     const providerResult = payment?.providerPaymentId
-      ? { provider: payment.provider, providerPaymentId: payment.providerPaymentId, status: payment.status, amountMinor: payment.amountMinor, currency: payment.currency }
+      ? { provider: payment.provider, providerPaymentId: payment.providerPaymentId, status: payment.status, amountMinor: payment.amountMinor, currency: payment.currency, clientSecret: payment.metadata?.clientSecret || null }
       : await provider.createPaymentIntent({ amountMinor, currency, orderId: order._id, idempotencyKey: key });
-    const values = { order: order._id, user: req.user.id, method: order.paymentMethod, amount: order.fee, amountMinor, currency, status: providerResult.status === "succeeded" ? "paid" : "pending", provider: providerResult.provider, providerPaymentId: providerResult.providerPaymentId || null, transactionId: providerResult.providerPaymentId || null, ...(key ? { idempotencyKey: key } : {}), metadata: { clientSecret: providerResult.clientSecret || null } };
+    const values = { order: order._id, user: req.user.id, method: order.paymentMethod, amount: order.fee, amountMinor, currency, status: providerResult.status === "succeeded" ? "paid" : "pending", provider: providerResult.provider, providerPaymentId: providerResult.providerPaymentId || null, transactionId: providerResult.providerPaymentId || null, ...(key ? { idempotencyKey: key } : {}), metadata: { ...(payment?.metadata || {}), clientSecret: providerResult.clientSecret || null } };
     if (payment) { Object.assign(payment, values); await payment.save(); } else payment = await Payment.create(values);
     if (payment.status === "paid") { payment.paidAt = new Date(); await payment.save(); order.paymentStatus = "paid"; } else order.paymentStatus = "pending";
     order.transactionId = payment.providerPaymentId || "";
