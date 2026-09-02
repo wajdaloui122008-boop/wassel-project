@@ -27,12 +27,14 @@
 
   function show(payload) {
     const user = window.__veltoUser;
-    if (user?.role && !["livreur", "taxi"].includes(user.role)) return;
-    const host = $("#d2offerList") || $("#taxi-offers");
+    if (user?.role && user.role !== "taxi") return;
+    // The livreur dashboard already owns #d2offerList and refreshes it by polling.
+    // Realtime cards therefore target only the taxi dashboard to avoid duplicate/vanishing offers.
+    const host = $("#taxi-offers");
     if (!host || !payload?.order) return;
     const o = payload.order, of = payload.offer || {}, id = String(o.id || payload.orderId || "");
     if (!id || host.querySelector(`[data-offer-id="${CSS.escape(id)}"]`)) return;
-    const info = typeInfo[o.serviceType] || typeInfo.colis;
+    const info = typeInfo[o.serviceType] || typeInfo.taxi;
     const exp = new Date(of.expiresAt || payload.expiresAt).getTime();
     const card = document.createElement("article"); card.className = "order-card"; card.dataset.offerId = id;
     card.innerHTML = `<div class="order-card-head"><span>${info[0]} ${info[1]} · #${esc(id.slice(-5))}</span><span class="d2countdown">--</span></div><p>📍 ${esc(o.pickup || payload.pickup)}</p><p>🏁 ${esc(o.dropoff || payload.dropoff)}</p><p>💰 ${Number(o.fee || 0).toFixed(2)} ${esc(o.currency || "TND")} · 📍 ${Number(of.distanceToPickupKm ?? payload.distanceToPickupKm ?? 0).toFixed(1)} km</p><div class="order-actions"><button class="accent">✓ Accepter</button><button>Refuser</button></div>`;
