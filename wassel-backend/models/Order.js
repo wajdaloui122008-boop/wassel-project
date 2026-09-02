@@ -48,12 +48,32 @@ orderSchema.index({ client: 1, createdAt: -1 });
 orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "dispatchOffers.driver": 1, "dispatchOffers.status": 1, "dispatchOffers.expiresAt": 1 });
-orderSchema.pre("save", function (next) {
-  if (this.isNew && this.status && this.statusHistory.length === 0) this.statusHistory.push({ status: this.status, at: this.createdAt || new Date() });
-  else if (this.isModified("status")) { const last = this.statusHistory[this.statusHistory.length - 1]; if (!last || last.status !== this.status) this.statusHistory.push({ status: this.status, at: new Date() }); }
-  next();
+
+// Mongoose 9-style pre hooks: return/await instead of using the removed callback `next` argument.
+orderSchema.pre("save", function () {
+  if (this.isNew && this.status && this.statusHistory.length === 0) {
+    this.statusHistory.push({ status: this.status, at: this.createdAt || new Date() });
+  } else if (this.isModified("status")) {
+    const last = this.statusHistory[this.statusHistory.length - 1];
+    if (!last || last.status !== this.status) this.statusHistory.push({ status: this.status, at: new Date() });
+  }
 });
-orderSchema.pre("findOneAndUpdate", function (next) { const update = this.getUpdate() || {}; const nextStatus = update.$set?.status ?? update.status; if (VALID_STATUSES.includes(nextStatus)) { const history = update.$push || (update.$push = {}); history.statusHistory = { status: nextStatus, at: new Date() }; } next(); });
-orderSchema.pre("validate", function (next) { if (this.serviceType === "colis" && typeof this.pkg === "string") { const match = this.pkg.match(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]/i); if (match) this.serviceType = match[1].toLowerCase(); } next(); });
+
+orderSchema.pre("findOneAndUpdate", function () {
+  const update = this.getUpdate() || {};
+  const nextStatus = update.$set?.status ?? update.status;
+  if (VALID_STATUSES.includes(nextStatus)) {
+    const push = update.$push || (update.$push = {});
+    push.statusHistory = { status: nextStatus, at: new Date() };
+  }
+});
+
+orderSchema.pre("validate", function () {
+  if (this.serviceType === "colis" && typeof this.pkg === "string") {
+    const match = this.pkg.match(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]/i);
+    if (match) this.serviceType = match[1].toLowerCase();
+  }
+});
+
 orderSchema.set("toJSON", { virtuals: true, transform: (doc, ret) => { delete ret._id; delete ret.__v; } });
 module.exports = mongoose.model("Order", orderSchema);
