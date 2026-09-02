@@ -27,90 +27,61 @@ function validLocation(location) {
 
 async function redispatchOrder(order) {
   const now = new Date();
-  const activeOfferExists = order.dispatchOffers?.some(
-    (offer) => offer.status === "offered" && new Date(offer.expiresAt) > now
-  );
+  const activeOfferExists = order.dispatchOffers?.some((offer) => offer.status === "offered" && new Date(offer.expiresAt) > now);
   if (activeOfferExists || order.livreur || order.status !== "nouvelle") return false;
 
-  const previousDriverIds = new Set(
-    (order.dispatchOffers || []).map((offer) => String(offer.driver))
-  );
+  const previousDriverIds = new Set((order.dispatchOffers || []).map((offer) => String(offer.driver)));
   const totalOffers = (order.dispatchOffers || []).length;
-  if (totalOffers >= MAX_TOTAL_OFFERS) return false;
-  if (!validLocation(order.pickupLocation)) return false;
+  if (totalOffers >= MAX_TOTAL_OFFERS || !validLocation(order.pickupLocation)) return false;
 
   const staleCutoff = new Date(Date.now() - GPS_MAX_AGE_MS);
   const drivers = await User.find({
-    role: "livreur",
-    isOnline: true,
-    isAvailable: true,
-    capabilities: order.serviceType,
-    "location.lat": { $exists: true },
-    "location.lng": { $exists: true },
-    "location.updatedAt": { $gte: staleCutoff }
+    role: "livreur", isOnline: true, isAvailable: true, capabilities: order.serviceType,
+    "location.lat": { $exists: true }, "location.lng": { $exists: true }, "location.updatedAt": { $gte: staleCutoff }
   }).select("location").limit(100);
 
-  const ranked = drivers
-    .filter((driver) => !previousDriverIds.has(String(driver._id)))
-    .map((driver) => ({
-      driver,
-      distanceKm: haversineKm(driver.location, order.pickupLocation)
-    }))
-    .filter((item) => item.distanceKm <= RADIUS_KM)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
+  const ranked = drivers.filter((driver) => !previousDriverIds.has(String(driver._id))).map((driver) => ({
+    driver, distanceKm: haversineKm(driver.location, order.pickupLocation)
+  })).filter((item) => item.distanceKm <= RADIUS_KM).sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, Math.min(BATCH_SIZE, MAX_TOTAL_OFFERS - totalOffers));
 
   if (!ranked.length) return false;
 
   const expiresAt = new Date(Date.now() + OFFER_TTL_MS);
-  const offers = ranked.map((item) => ({
-    driver: item.driver._id,
-    distanceToPickupKm: Math.round(item.distanceKm * 100) / 100,
-    offeredAt: now,
-    expiresAt,
-    status: "offered"
-  }));
+  const offers = ranked.map((item) => ({ driver: item.driver._id, distanceToPickupKm: Math.round(item.distanceKm * 100) / 100, offeredAt: now, expiresAt, status: "offered" }));
 
   const updated = await Order.findOneAndUpdate(
-    {
-      _id: order._id,
-      status: "nouvelle",
-      livreur: null,
-      dispatchOffers: {
-        $not: {
-          $elemMatch: {
-            status: "offered",
-            expiresAt: { $gt: now }
-          }
-        }
-      }
-    },
+    { _id: order._id, status: "nouvelle", livreur: null, dispatchOffers: { $not: { $elemMatch: { status: "offered", expiresAt: { $gt: now } } } } },
     { $push: { dispatchOffers: { $each: offers } } },
     { new: true }
   );
 
-  return Boolean(updated);
+  if (!updated) return false;
+
+  const io = global.__veltoIO;
+  if (io) {
+    for (const offer of offers) {
+      io.to(`driver:${String(offer.driver)}`).emit("driver:offer", {
+        orderId: String(order._id),
+        serviceType: order.serviceType,
+        distanceToPickupKm: offer.distanceToPickupKm,
+        expiresAt: offer.expiresAt,
+        pickup: order.pickup,
+        dropoff: order.dropoff
+      });
+    }
+  }
+  return true;
 }
 
 async function processRedispatch() {
   if (mongoose.connection.readyState !== 1) return;
-  const orders = await Order.find({
-    status: "nouvelle",
-    livreur: null
-  }).sort({ createdAt: 1 }).limit(100);
-
+  const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
   for (const order of orders) {
-    try {
-      await redispatchOrder(order);
-    } catch (error) {
-      console.error("Dispatch redispatch error:", error.message);
-    }
+    try { await redispatchOrder(order); } catch (error) { console.error("Dispatch redispatch error:", error.message); }
   }
 }
 
-const timer = setInterval(() => {
-  processRedispatch().catch((error) => console.error("Dispatch queue error:", error.message));
-}, TICK_MS);
+const timer = setInterval(() => { processRedispatch().catch((error) => console.error("Dispatch queue error:", error.message)); }, TICK_MS);
 timer.unref();
-
 console.log("Dispatch redispatch worker actif");
