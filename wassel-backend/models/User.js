@@ -1,3 +1,4 @@
+const authProviders = require("../services/authProviders");
 const mongoose = require("mongoose");
 
 const VALID_SERVICE_TYPES = ["colis", "food", "taxi", "shop", "market"];
