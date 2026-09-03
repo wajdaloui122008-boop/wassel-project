@@ -16,7 +16,7 @@ jobs:
           node <<'NODE'
           (async () => {
             const base = process.env.FRONTEND_URL.replace(/\/$/, '');
-            const paths = ['/', '/index.html', '/style.css', '/script.js', '/social-auth.js', '/manifest.webmanifest'];
+            const paths = ['/', '/index.html', '/style.css', '/script.js', '/social-auth.js', '/runtime-guard.js', '/service-ux-v1.js', '/order-tracking-enhancements.js', '/driver-actions-fix.js', '/driver-active-ux.js', '/manifest.webmanifest', '/sw.js'];
             for (const path of paths) {
               const url = base + path;
               const controller = new AbortController();
