@@ -1,8 +1,10 @@
-const CACHE = "velto-shell-v10";
+const CACHE = "velto-shell-v11";
 const ASSETS = [
   "/",
   "/index.html",
   "/style.css",
+  "/liquid-glass.css",
+  "/liquid-glass-v2.css",
   "/script.js",
   "/tracking.js",
   "/dashboard2.js",
@@ -18,7 +20,10 @@ const ASSETS = [
   "/ratings.js",
   "/admin-dashboard.js",
   "/pwa.js",
-  "/manifest.webmanifest"
+  "/liquid-glass-interaction.js",
+  "/social-auth.js",
+  "/manifest.webmanifest",
+  "/icon.svg"
 ];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
