@@ -48,7 +48,7 @@ function attachRealtime(server) {
       if (typeof orderId !== "string" || !mongoose.isValidObjectId(orderId)) return;
       try {
         const order = await Order.findById(orderId)
-          .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory")
+          .select("client livreur status serviceType pickup dropoff pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory")
           .populate("livreur", "name location isOnline isAvailable");
         if (!order) return;
         if (String(order.client || "") !== userId && String(order.livreur?._id || order.livreur || "") !== userId && socket.user?.role !== "admin") return;
@@ -79,7 +79,7 @@ function attachRealtime(server) {
           { status: { $in: ["livree", "annulee"] }, updatedAt: { $gte: recentTerminalCutoff } },
         ],
       })
-        .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory updatedAt")
+        .select("client livreur status serviceType pickup dropoff pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory updatedAt")
         .populate("livreur", "name location isOnline isAvailable")
         .lean();
 
@@ -154,8 +154,11 @@ function buildSnapshot(order) {
   const livreur = order.livreur && typeof order.livreur === "object" ? order.livreur : null;
   return {
     orderId: String(order._id),
+    id: String(order._id),
     status: order.status,
     serviceType: order.serviceType,
+    pickup: order.pickup || "",
+    dropoff: order.dropoff || "",
     currency: order.currency,
     paymentStatus: order.paymentStatus,
     pickupLocation: order.pickupLocation || null,
