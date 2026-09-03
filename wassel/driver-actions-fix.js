@@ -17,9 +17,11 @@
   };
 
   async function refreshDashboard() {
-    if (typeof window.loadDriver === "function") {
-      try { await window.loadDriver("all"); } catch {}
-    }
+    // dashboard2.js keeps loadDriver private inside its IIFE. Trigger its
+    // existing delegated filter handler instead of relying on a nonexistent
+    // global function.
+    const activeFilter = document.querySelector("#d2filters .d2filter.active");
+    if (activeFilter) activeFilter.click();
     document.dispatchEvent(new CustomEvent("velto:driver-refresh"));
   }
 
