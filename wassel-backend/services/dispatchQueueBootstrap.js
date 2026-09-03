@@ -28,8 +28,24 @@ function validLocation(location) {
 function driverMatchesService(driver, serviceType) {
   if (serviceType === "taxi") return driver.role === "taxi";
   if (driver.role !== "livreur") return false;
-  // Accounts created before capabilities existed are valid for all delivery services.
   return !Array.isArray(driver.capabilities) || driver.capabilities.length === 0 || driver.capabilities.includes(serviceType);
+}
+
+async function cleanupDriverOffers() {
+  const [unavailableDrivers, activeOrders] = await Promise.all([
+    User.find({ role: { $in: ["livreur", "taxi"] }, $or: [{ isOnline: false }, { isAvailable: false }] }).select("_id").lean(),
+    Order.find({ status: { $in: ["acceptee", "route"] }, livreur: { $ne: null } }).select("livreur").lean(),
+  ]);
+  const blockedDriverIds = [...new Set([
+    ...unavailableDrivers.map((driver) => String(driver._id)),
+    ...activeOrders.map((order) => String(order.livreur)),
+  ])];
+  if (!blockedDriverIds.length) return;
+  await Order.updateMany(
+    { status: "nouvelle", "dispatchOffers.status": "offered", "dispatchOffers.driver": { $in: blockedDriverIds } },
+    { $set: { "dispatchOffers.$[offer].status": "cancelled", "dispatchOffers.$[offer].respondedAt": new Date() } },
+    { arrayFilters: [{ "offer.status": "offered", "offer.driver": { $in: blockedDriverIds } }] },
+  );
 }
 
 async function redispatchOrder(order) {
@@ -52,7 +68,6 @@ async function redispatchOrder(order) {
     "location.updatedAt": { $gte: staleCutoff },
   };
   if (roleFilter === "livreur") {
-    // Match capable livreurs plus legacy accounts with no capabilities field.
     driverQuery.$or = [
       { capabilities: order.serviceType },
       { capabilities: { $exists: false } },
@@ -61,7 +76,6 @@ async function redispatchOrder(order) {
   }
 
   const drivers = await User.find(driverQuery).select("location capabilities role").limit(100);
-
   const ranked = drivers.filter((driver) => driverMatchesService(driver, order.serviceType) && !previousDriverIds.has(String(driver._id)))
     .map((driver) => ({ driver, distanceKm: haversineKm(driver.location, order.pickupLocation) }))
     .filter((item) => item.distanceKm <= RADIUS_KM).sort((a, b) => a.distanceKm - b.distanceKm)
@@ -78,14 +92,42 @@ async function redispatchOrder(order) {
   return Boolean(updated);
 }
 
+let tickInFlight = false;
+let stopping = false;
+
 async function processRedispatch() {
-  if (mongoose.connection.readyState !== 1) return;
-  const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
-  for (const order of orders) {
-    try { await redispatchOrder(order); } catch (error) { console.error("Dispatch redispatch error:", error.message); }
+  if (tickInFlight || stopping || mongoose.connection.readyState !== 1) return;
+  tickInFlight = true;
+  try {
+    await cleanupDriverOffers();
+    const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
+    for (const order of orders) {
+      if (stopping || mongoose.connection.readyState !== 1) break;
+      try {
+        await redispatchOrder(order);
+      } catch (error) {
+        if (!stopping && mongoose.connection.readyState === 1) console.error("Dispatch redispatch error:", error.message);
+      }
+    }
+  } catch (error) {
+    if (!stopping && mongoose.connection.readyState === 1) console.error("Dispatch queue error:", error.message);
+  } finally {
+    tickInFlight = false;
   }
 }
 
-const timer = setInterval(() => { processRedispatch().catch((error) => console.error("Dispatch queue error:", error.message)); }, TICK_MS);
+const timer = setInterval(() => {
+  if (!stopping) processRedispatch();
+}, TICK_MS);
 timer.unref();
+
+async function stopDispatchWorker() {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(timer);
+}
+
+process.once("SIGTERM", stopDispatchWorker);
+process.once("SIGINT", stopDispatchWorker);
+
 console.log("Dispatch redispatch worker actif");

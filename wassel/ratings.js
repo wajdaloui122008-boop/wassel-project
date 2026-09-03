@@ -3,25 +3,28 @@
   const token = () => localStorage.getItem("velto_token") || "";
   const H = () => token() ? { Authorization: `Bearer ${token()}` } : {};
   let cache = [];
+  let loadInFlight = false;
 
   async function loadOrders() {
-    if (!token()) return;
+    if (!token() || loadInFlight) return;
+    loadInFlight = true;
     try {
-      const r = await fetch(`${API}/orders`, { headers: H() });
+      const r = await fetch(`${API}/orders?limit=50`, { headers: H() });
       if (!r.ok) return;
       const data = await r.json();
       cache = Array.isArray(data) ? data : [];
       injectButtons();
-    } catch {}
+    } catch {} finally {
+      loadInFlight = false;
+    }
   }
 
   function injectButtons() {
     const delivered = cache.filter(o => o.status === "livree");
-    document.querySelectorAll(".order-card").forEach(card => {
+    document.querySelectorAll(".order-card[data-order-id]").forEach(card => {
       if (card.querySelector(".velto-rate-btn")) return;
-      const text = card.querySelector(".order-id")?.textContent || "";
-      const suffix = text.replace(/[^A-Za-z0-9]/g, "").slice(-6).toLowerCase();
-      const order = delivered.find(o => String(o.id || o._id || "").slice(-6).toLowerCase() === suffix);
+      const orderId = String(card.dataset.orderId || "");
+      const order = delivered.find(o => String(o.id || o._id || "") === orderId);
       if (!order) return;
       const actions = card.querySelector(".order-actions");
       if (!actions) return;
@@ -36,9 +39,10 @@
   async function rate(order, button) {
     button.disabled = true;
     try {
-      const existingResponse = await fetch(`${API}/ratings/order/${encodeURIComponent(order.id || order._id)}`, { headers: H() });
+      const orderId = String(order.id || order._id || "");
+      const existingResponse = await fetch(`${API}/ratings/order/${encodeURIComponent(orderId)}`, { headers: H() });
       const existing = existingResponse.ok ? await existingResponse.json() : [];
-      const me = window.__veltoUser?.id || "";
+      const me = window.__veltoUser?.id || window.__veltoUser?._id || "";
       if (Array.isArray(existing) && existing.some(r => String(r.rater?.id || r.rater?._id || r.rater || "") === String(me))) {
         button.textContent = "✓ Déjà noté";
         return;
@@ -51,7 +55,7 @@
       const r = await fetch(`${API}/ratings`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...H() },
-        body: JSON.stringify({ orderId: order.id || order._id, rating: score, comment })
+        body: JSON.stringify({ orderId, rating: score, comment })
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "Impossible d'enregistrer la note");
@@ -65,5 +69,6 @@
   }
 
   window.addEventListener("velto:auth", loadOrders);
-  document.addEventListener("DOMContentLoaded", () => { loadOrders(); setInterval(loadOrders, 3000); });
+  window.addEventListener("velto:orders-rendered", injectButtons);
+  document.addEventListener("DOMContentLoaded", () => { loadOrders(); setInterval(loadOrders, 5000); });
 })();

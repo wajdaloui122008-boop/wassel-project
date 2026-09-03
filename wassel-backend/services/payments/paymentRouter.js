@@ -6,14 +6,38 @@ const { requireAuth, requireRole } = require("../../middleware/auth");
 const { getPaymentProvider, normalizeCurrency, toMinorUnits } = require("./index");
 
 const router = express.Router();
+const refundAttempts = new Map();
+const REFUND_WINDOW_MS = 15 * 60 * 1000;
+const REFUND_MAX_ATTEMPTS = 10;
+
 function idempotencyKey(req) { const value = req.get("Idempotency-Key") || req.body?.idempotencyKey || ""; return String(value).trim().slice(0, 200) || null; }
+function refundRateLimit(req, res, next) {
+  const key = `${req.user?.id || "anonymous"}:${req.ip || "unknown"}`;
+  const now = Date.now();
+  const previous = refundAttempts.get(key);
+  if (!previous || now - previous.startedAt >= REFUND_WINDOW_MS) {
+    refundAttempts.set(key, { startedAt: now, count: 1 });
+    return next();
+  }
+  previous.count += 1;
+  if (previous.count > REFUND_MAX_ATTEMPTS) {
+    res.set("Retry-After", String(Math.ceil((REFUND_WINDOW_MS - (now - previous.startedAt)) / 1000)));
+    return res.status(429).json({ error: "Trop de demandes de remboursement. Réessayez plus tard." });
+  }
+  return next();
+}
+setInterval(() => {
+  const cutoff = Date.now() - REFUND_WINDOW_MS;
+  for (const [key, value] of refundAttempts) if (value.startedAt < cutoff) refundAttempts.delete(key);
+}, REFUND_WINDOW_MS).unref();
 
 // Safe public configuration: never expose a Stripe secret key.
 router.get("/config", (req, res) => {
   const provider = String(process.env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
+  const stripeConfigured = provider === "stripe" && Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PUBLISHABLE_KEY);
   res.json({
     provider,
-    configured: provider !== "stripe" || Boolean(process.env.STRIPE_SECRET_KEY),
+    configured: provider !== "stripe" || stripeConfigured,
     stripePublishableKey: provider === "stripe" ? (process.env.STRIPE_PUBLISHABLE_KEY || null) : null
   });
 });
@@ -53,11 +77,10 @@ router.get("/:orderId", requireAuth, async (req, res) => {
   catch (err) { console.error("Get payment error:", err); res.status(500).json({ error: "Erreur paiement" }); }
 });
 
-router.post("/:id/refund", requireAuth, async (req, res) => {
+router.post("/:id/refund", requireAuth, requireRole("admin"), refundRateLimit, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Identifiant de transaction invalide" });
-    const filter = req.user.role === "admin" ? { _id: req.params.id } : { _id: req.params.id, user: req.user.id };
-    const payment = await Payment.findOne(filter);
+    const payment = await Payment.findById(req.params.id);
     if (!payment) return res.status(404).json({ error: "Transaction introuvable" });
     if (payment.status !== "paid") return res.status(409).json({ error: "Seule une transaction payée peut être remboursée" });
     if (!payment.providerPaymentId) return res.status(409).json({ error: "Cette transaction n'a pas de paiement fournisseur" });
@@ -65,11 +88,15 @@ router.post("/:id/refund", requireAuth, async (req, res) => {
     const requestedAmount = req.body.amount != null ? Number(req.body.amount) : payment.amount;
     const amountMinor = toMinorUnits(requestedAmount, payment.currency);
     if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0 || amountMinor > payment.amountMinor) return res.status(400).json({ error: "Montant de remboursement invalide" });
-    const result = await provider.refundPayment({ providerPaymentId: payment.providerPaymentId, amountMinor, idempotencyKey: idempotencyKey(req) || `refund_${payment._id}_${amountMinor}` });
+    const alreadyRefundedMinor = Number(payment.metadata?.refundedAmountMinor || 0);
+    if (alreadyRefundedMinor + amountMinor > payment.amountMinor) return res.status(409).json({ error: "Le montant cumulé des remboursements dépasse le paiement" });
+    const result = await provider.refundPayment({ providerPaymentId: payment.providerPaymentId, amountMinor, idempotencyKey: idempotencyKey(req) || `refund_${payment._id}_${alreadyRefundedMinor + amountMinor}` });
     payment.providerRefundId = result.providerRefundId || payment.providerRefundId;
-    payment.metadata = { ...(payment.metadata || {}), refundStatus: result.status || "unknown", refundAmountMinor: amountMinor };
-    if (result.status === "succeeded" || result.status === "refunded") { payment.status = "refunded"; payment.refundedAt = new Date(); await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "refunded", transactionId: payment.providerPaymentId || "" } }); }
-    await payment.save(); res.json({ payment, refund: result });
+    const totalRefundedMinor = alreadyRefundedMinor + amountMinor;
+    payment.metadata = { ...(payment.metadata || {}), refundStatus: result.status || "unknown", lastRefundAmountMinor: amountMinor, refundedAmountMinor: totalRefundedMinor };
+    if ((result.status === "succeeded" || result.status === "refunded") && totalRefundedMinor >= payment.amountMinor) { payment.status = "refunded"; payment.refundedAt = new Date(); await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "refunded", transactionId: payment.providerPaymentId || "" } }); }
+    await payment.save();
+    res.json({ payment, refund: result });
   } catch (err) { console.error("Refund payment error:", err); res.status(500).json({ error: "Erreur remboursement" }); }
 });
 

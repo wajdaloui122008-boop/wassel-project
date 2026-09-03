@@ -66,14 +66,24 @@ function attachRealtime(server) {
 
   const lastSnapshots = new Map();
   const sentOffers = new Map();
+  let shuttingDown = false;
 
   const tick = async () => {
-    if (mongoose.connection.readyState !== 1) return;
+    if (shuttingDown || mongoose.connection.readyState !== 1) return;
     try {
-      const active = await Order.find({ status: { $in: ["acceptee", "route"] }, livreur: { $ne: null } })
-        .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory")
+      const now = Date.now();
+      const recentTerminalCutoff = new Date(now - 15000);
+      const active = await Order.find({
+        $or: [
+          { status: { $in: ["acceptee", "route"] }, livreur: { $ne: null } },
+          { status: { $in: ["livree", "annulee"] }, updatedAt: { $gte: recentTerminalCutoff } },
+        ],
+      })
+        .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory updatedAt")
         .populate("livreur", "name location isOnline isAvailable")
         .lean();
+
+      if (shuttingDown || mongoose.connection.readyState !== 1) return;
 
       for (const order of active) {
         const snapshot = buildSnapshot(order);
@@ -85,13 +95,14 @@ function attachRealtime(server) {
         }
       }
 
-      const now = Date.now();
       const offerOrders = await Order.find({
         status: "nouvelle",
         "dispatchOffers.status": "offered",
         "dispatchOffers.expiresAt": { $gt: new Date() },
         "dispatchOffers.offeredAt": { $gte: new Date(now - 10000) }
       }).select("id serviceType pickup dropoff pkg fee currency dispatchOffers").lean();
+
+      if (shuttingDown || mongoose.connection.readyState !== 1) return;
 
       for (const order of offerOrders) {
         for (const offer of order.dispatchOffers || []) {
@@ -123,12 +134,19 @@ function attachRealtime(server) {
         if (!active.some((order) => String(order._id) === key)) lastSnapshots.delete(key);
       }
     } catch (err) {
-      console.error("Realtime tick error:", err.message);
+      if (!shuttingDown && mongoose.connection.readyState !== 0) console.error("Realtime tick error:", err.message);
     }
   };
 
   const timer = setInterval(tick, 1500);
   timer.unref();
+  server.once("close", () => {
+    shuttingDown = true;
+    clearInterval(timer);
+    io.close();
+    lastSnapshots.clear();
+    sentOffers.clear();
+  });
   console.log("Velto realtime gateway actif");
 }
 

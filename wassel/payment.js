@@ -7,6 +7,9 @@
   let stripe = null;
   let elements = null;
   let activePayment = null;
+  let scanInFlight = false;
+  const scanAttempts = new Map();
+  const SCAN_RETRY_COOLDOWN_MS = 20000;
 
   function ensureUi() {
     if (document.getElementById("velto-payment-modal")) return;
@@ -18,7 +21,7 @@
     document.getElementById("velto-payment-close").onclick = close;
     document.getElementById("velto-payment-submit").onclick = confirmStripePayment;
   }
-  function close() { const el=document.getElementById("velto-payment-modal"); if(el) el.style.display="none"; activePayment=null; }
+  function close() { const el=document.getElementById("velto-payment-modal"); if(el) el.style.display="none"; activePayment=null; elements=null; }
   function open() { ensureUi(); document.getElementById("velto-payment-modal").style.display="flex"; }
   function setMessage(text) { const el=document.getElementById("velto-payment-message"); if(el) el.textContent=text; }
   function setError(text) { const el=document.getElementById("velto-payment-error"); if(el) el.textContent=text || ""; }
@@ -37,8 +40,9 @@
     const key = `velto_payment_${order.id}`;
     if (sessionStorage.getItem(key) === "done") return;
     open();
-    activePayment = order;
+    activePayment = {...order, _orderId:String(order.id)};
     setError("");
+    const mount=document.getElementById("velto-payment-element"); if(mount) mount.innerHTML="";
     document.getElementById("velto-payment-summary").textContent = `Commande #${String(order.id).slice(-5)} · ${amountText(order)}`;
     document.getElementById("velto-payment-submit").style.display="none";
     setMessage("Création de la transaction…");
@@ -73,8 +77,8 @@
       setMessage("Paiement envoyé. Confirmation en cours…");
       for(let i=0;i<8;i++){
         await new Promise(r=>setTimeout(r,1000));
-        const r=await fetch(`${API}/payments/${activePayment.id}`,{headers:auth()}); const d=await json(r);
-        if(r.ok && d.payment?.status === "paid") { sessionStorage.setItem(`velto_payment_${activePayment.id}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
+        const r=await fetch(`${API}/payments/${activePayment._orderId}`,{headers:auth()}); const d=await json(r);
+        if(r.ok && d.payment?.status === "paid") { sessionStorage.setItem(`velto_payment_${activePayment._orderId}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
         if(r.ok && d.payment?.status === "failed") throw Error("Le paiement a échoué.");
       }
       setMessage("Paiement envoyé. La confirmation finale arrivera après le webhook du fournisseur.");
@@ -83,16 +87,26 @@
   }
 
   async function scan() {
-    if(!token()) return;
+    if(!token() || scanInFlight || activePayment) return;
+    scanInFlight=true;
     try {
       const r=await fetch(`${API}/orders`,{headers:auth()}); if(!r.ok) return; const data=await json(r); if(!Array.isArray(data)) return;
-      const pending=data.filter(o=>["carte","wallet"].includes(o.paymentMethod)&&o.paymentStatus!=="paid"&&o.status!=="annulee");
-      const candidate=pending.find(o=>sessionStorage.getItem(`velto_payment_${o.id}`)!=="done");
-      if(candidate && !activePayment) await startPayment(candidate);
-    } catch {}
+      const now=Date.now();
+      for(const [id,at] of scanAttempts) if(now-at>SCAN_RETRY_COOLDOWN_MS) scanAttempts.delete(id);
+      const pending=data
+        .filter(o=>["carte","wallet"].includes(o.paymentMethod)&&o.paymentStatus!=="paid"&&o.status!=="annulee")
+        .sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0));
+      const candidate=pending.find(o=>sessionStorage.getItem(`velto_payment_${o.id}`)!=="done"&&!scanAttempts.has(String(o.id)));
+      if(candidate) {
+        scanAttempts.set(String(candidate.id),now);
+        await startPayment(candidate);
+      }
+    } catch {} finally { scanInFlight=false; }
   }
   ensureUi();
   setTimeout(scan,2500);
   setInterval(scan,7000);
+  window.addEventListener("velto:auth",()=>setTimeout(scan,250));
+  window.addEventListener("velto:orders-updated",()=>setTimeout(scan,100));
   window.veltoStartPayment = startPayment;
 })();

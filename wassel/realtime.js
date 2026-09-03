@@ -4,8 +4,10 @@
   let token = localStorage.getItem("velto_token") || null;
   let watched = new Set();
   let refreshTimer = null;
+  let syncInFlight = false;
   const lastStatus = new Map();
-  const notifiedOffers = new Set();
+  const notifiedOffers = new Map();
+  const OFFER_DEDUPE_MS = 120000;
 
   function loadSocketIO() {
     if (window.io) return Promise.resolve();
@@ -29,12 +31,18 @@
   }
 
   async function syncSubscriptions() {
-    if (!socket?.connected || !token) return;
-    const orders = await getActiveOrders();
-    const next = new Set(orders.map((o) => String(o.id || o._id)).filter(Boolean));
-    for (const id of next) if (!watched.has(id)) socket.emit("order:watch", id);
-    for (const id of watched) if (!next.has(id)) socket.emit("order:unwatch", id);
-    watched = next;
+    if (!socket?.connected || !token || syncInFlight) return;
+    syncInFlight = true;
+    try {
+      const orders = await getActiveOrders();
+      if (!socket?.connected || !token) return;
+      const next = new Set(orders.map((o) => String(o.id || o._id)).filter(Boolean));
+      for (const id of next) if (!watched.has(id)) socket.emit("order:watch", id);
+      for (const id of watched) if (!next.has(id)) socket.emit("order:unwatch", id);
+      watched = next;
+    } finally {
+      syncInFlight = false;
+    }
   }
 
   function watchOrder(orderId) {
@@ -80,10 +88,15 @@
 
   function handleOffer(offer) {
     const id = String(offer?.order?.id || offer?.order?._id || offer?.id || "");
+    const now = Date.now();
+    for (const [offerId, seenAt] of notifiedOffers) {
+      if (now - seenAt > OFFER_DEDUPE_MS) notifiedOffers.delete(offerId);
+    }
     if (id && notifiedOffers.has(id)) return;
-    if (id) notifiedOffers.add(id);
+    if (id) notifiedOffers.set(id, now);
     const order = offer?.order || {};
-    notify("Nouvelle course taxi", `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || Date.now()}`);
+    const label = order.serviceType === "taxi" ? "Nouvelle course taxi" : "Nouvelle course livreur";
+    notify(label, `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`, `offer-${id || now}`);
     window.dispatchEvent(new CustomEvent("velto:realtime-offer", { detail: offer }));
   }
 
@@ -91,7 +104,13 @@
     if (!window.io || !token) return;
     if (socket) socket.disconnect();
     socket = window.io(API, { auth: { token }, transports: ["websocket", "polling"] });
-    socket.on("connect", syncSubscriptions);
+    socket.on("connect", () => {
+      watched.clear();
+      syncSubscriptions();
+    });
+    socket.on("disconnect", () => {
+      watched.clear();
+    });
     socket.on("order:snapshot", handleOrder);
     socket.on("order:update", handleOrder);
     socket.on("driver:offer", handleOffer);

@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 
 const isProduction = process.env.NODE_ENV === "production";
 const JWT_SECRET = process.env.JWT_SECRET;
+const MAX_TOKEN_LENGTH = 4096;
 
 if (isProduction && !JWT_SECRET) {
   throw new Error("JWT_SECRET must be configured in production");
@@ -16,12 +17,15 @@ function requireAuth(req, res, next) {
   }
 
   const token = header.slice(7).trim();
-  if (!token) {
-    return res.status(401).json({ error: "Authentification requise" });
+  if (!token || token.length > MAX_TOKEN_LENGTH || token.split(".").length !== 3) {
+    return res.status(401).json({ error: "Session invalide, reconnectez-vous" });
   }
 
   try {
-    req.user = jwt.verify(token, effectiveSecret);
+    req.user = jwt.verify(token, effectiveSecret, { algorithms: ["HS256"] });
+    if (!req.user?.id || !req.user?.role) {
+      return res.status(401).json({ error: "Session invalide, reconnectez-vous" });
+    }
     next();
   } catch (err) {
     return res.status(401).json({ error: "Session invalide, reconnectez-vous" });

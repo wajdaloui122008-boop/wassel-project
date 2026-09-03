@@ -9,6 +9,12 @@
   let activeOrder = null;
 
   const esc = (v) => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  function isTaxiUser() {
+    if (window.__veltoUser?.role === "taxi") return true;
+    const raw = token().split(".")[1];
+    if (!raw) return false;
+    try { return JSON.parse(atob(raw.replace(/-/g, "+").replace(/_/g, "/"))).role === "taxi"; } catch { return false; }
+  }
 
   async function api(path, options = {}) {
     const res = await fetch(API + path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
@@ -28,11 +34,12 @@
   }
 
   async function syncState() {
-    if (window.__veltoUser?.role !== "taxi") return;
+    if (!isTaxiUser()) return;
     try {
       const me = await api("/auth/me");
       online = Boolean(me.user?.isOnline);
       available = Boolean(me.user?.isAvailable);
+      window.__veltoUser = me.user || window.__veltoUser || null;
       renderStatus();
       if (online) startGPS();
     } catch {}
@@ -71,7 +78,7 @@
   function stopGPS() { if (gpsWatch !== null) navigator.geolocation.clearWatch(gpsWatch); gpsWatch = null; const el = document.getElementById("taxi-gps"); if (el) el.textContent = "Non connecté"; }
 
   async function refreshActiveOrder() {
-    if (window.__veltoUser?.role !== "taxi") return;
+    if (!isTaxiUser()) return;
     try {
       const data = await api("/drivers/me/active-order");
       activeOrder = data.order || null;
@@ -116,7 +123,7 @@
   }
 
   async function refreshOffers() {
-    if (!online || activeOrder || window.__veltoUser?.role !== "taxi") return;
+    if (!online || activeOrder || !isTaxiUser()) return;
     try {
       const rows = await api("/drivers/me/offers");
       const offers = Array.isArray(rows) ? rows : [];
@@ -144,7 +151,8 @@
     } catch (err) { alert(err.message); }
   }
 
-  window.addEventListener("velto:auth", () => { if (window.__veltoUser?.role === "taxi") { mount(); syncState(); refreshActiveOrder(); } });
+  window.addEventListener("velto:auth", () => { if (isTaxiUser()) { mount(); syncState(); refreshActiveOrder(); } });
+  window.addEventListener("velto:refresh-taxi-offers", () => refreshOffers());
   window.__veltoUser = window.__veltoUser || null;
   setTimeout(mount, 300);
   timer = setInterval(() => { refreshActiveOrder(); refreshOffers(); }, 2500);
