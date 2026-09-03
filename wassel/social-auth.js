@@ -14,6 +14,13 @@
     else window.alert(message);
   }
 
+  function cleanAuthQuery() {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("auth");
+    const cleanUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, cleanUrl);
+  }
+
   function finishOAuth() {
     const params = new URLSearchParams(window.location.search);
     const raw = params.get("auth");
@@ -24,32 +31,31 @@
     const error = auth.get("error");
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
-      params.delete("auth");
-      const cleanUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
-      window.history.replaceState({}, document.title, cleanUrl);
+      cleanAuthQuery();
       window.location.reload();
       return true;
     }
     if (error) {
-      params.delete("auth");
-      const cleanUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
-      window.history.replaceState({}, document.title, cleanUrl);
+      cleanAuthQuery();
       showAuthError(error);
       return true;
     }
+    cleanAuthQuery();
     return false;
   }
 
   function bindProviderButton(button) {
     if (button.dataset.socialAuthBound === "1") return;
     button.dataset.socialAuthBound = "1";
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
       const provider = String(button.dataset.provider || "").toLowerCase();
       if (provider !== "google" && provider !== "apple") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
       const role = encodeURIComponent(currentRole());
       button.disabled = true;
       window.location.assign(`${API_URL}/auth/${provider}?role=${role}`);
-    });
+    }, true);
   }
 
   function bind() {
