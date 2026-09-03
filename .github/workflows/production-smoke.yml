@@ -16,7 +16,7 @@ jobs:
           node <<'NODE'
           (async () => {
             const base = process.env.FRONTEND_URL.replace(/\/$/, '');
-            const paths = ['/', '/index.html', '/style.css', '/script.js', '/manifest.webmanifest'];
+            const paths = ['/', '/index.html', '/style.css', '/script.js', '/social-auth.js', '/manifest.webmanifest'];
             for (const path of paths) {
               const url = base + path;
               const controller = new AbortController();
@@ -63,5 +63,76 @@ jobs:
               if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, 5000));
             }
             throw lastError || new Error('Production backend health check failed');
+          })().catch(error => { console.error(error); process.exit(1); });
+          NODE
+
+      - name: Check production API authentication guard
+        env:
+          API_BASE_URL: https://wassel-backend-ds3n.onrender.com
+        run: |
+          node <<'NODE'
+          (async () => {
+            const base = process.env.API_BASE_URL.replace(/\/$/, '');
+            const checks = [
+              { path: '/orders', expected: 401 },
+              { path: '/auth/me', headers: { Authorization: 'Bearer not-a-valid-jwt' }, expected: 401 },
+              { path: '/drivers/nearby?lat=36.8&lng=10.18', expected: 401 },
+            ];
+            for (const check of checks) {
+              const response = await fetch(base + check.path, { headers: check.headers || {} });
+              const body = await response.text();
+              console.log(`${check.path} -> ${response.status} ${body.slice(0, 300)}`);
+              if (response.status !== check.expected) {
+                throw new Error(`Expected HTTP ${check.expected} for ${check.path}, got ${response.status}`);
+              }
+            }
+          })().catch(error => { console.error(error); process.exit(1); });
+          NODE
+
+      - name: Check production social authentication routes
+        env:
+          API_BASE_URL: https://wassel-backend-ds3n.onrender.com
+        run: |
+          node <<'NODE'
+          (async () => {
+            const base = process.env.API_BASE_URL.replace(/\/$/, '');
+            const providers = ['google', 'apple'];
+            for (const provider of providers) {
+              const response = await fetch(`${base}/auth/${provider}?role=client`, { redirect: 'manual' });
+              const body = await response.text();
+              console.log(`${provider} -> ${response.status} location=${response.headers.get('location') || 'none'} body=${body.slice(0, 300)}`);
+              if (![302, 303, 307, 308, 503].includes(response.status)) {
+                throw new Error(`Unexpected HTTP ${response.status} for /auth/${provider}`);
+              }
+              if (response.status === 302 || response.status === 303 || response.status === 307 || response.status === 308) {
+                const location = response.headers.get('location') || '';
+                if (!location.startsWith(provider === 'google' ? 'https://accounts.google.com/' : 'https://appleid.apple.com/')) {
+                  throw new Error(`Unexpected OAuth redirect for ${provider}: ${location}`);
+                }
+              }
+            }
+          })().catch(error => { console.error(error); process.exit(1); });
+          NODE
+
+      - name: Check production API malformed input handling
+        env:
+          API_BASE_URL: https://wassel-backend-ds3n.onrender.com
+        run: |
+          node <<'NODE'
+          (async () => {
+            const base = process.env.API_BASE_URL.replace(/\/$/, '');
+            const notFound = await fetch(base + '/definitely-not-a-real-route');
+            const notFoundBody = await notFound.text();
+            console.log(`404 check -> ${notFound.status} ${notFoundBody.slice(0, 300)}`);
+            if (notFound.status !== 404) throw new Error(`Expected HTTP 404, got ${notFound.status}`);
+
+            const malformed = await fetch(base + '/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: '{"email":'
+            });
+            const malformedBody = await malformed.text();
+            console.log(`Malformed JSON check -> ${malformed.status} ${malformedBody.slice(0, 300)}`);
+            if (malformed.status !== 400) throw new Error(`Expected HTTP 400 for malformed JSON, got ${malformed.status}`);
           })().catch(error => { console.error(error); process.exit(1); });
           NODE
