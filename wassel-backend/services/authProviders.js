@@ -9,6 +9,7 @@ router.use(originalExpress.json({ limit: "8kb" }));
 const states = new Map();
 const otpAttempts = new Map();
 const jwksCache = new Map();
+const whatsappOtps = new Map();
 
 function UserModel() { return require("../models/User"); }
 function clean(value, max = 160) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
@@ -71,20 +72,54 @@ router.post("/apple/callback", async (req, res) => {
   } catch (error) { console.error("Apple auth error:", error.message); redirectWithResult(res, { error: "Connexion Apple impossible" }); }
 });
 
+function normalizeWhatsAppPhone(value) {
+  const phone = clean(value, 30).replace(/[^+\d]/g, "");
+  return /^\+\d{8,15}$/.test(phone) ? phone : "";
+}
+function otpHash(code) { return crypto.createHash("sha256").update(`${code}:${process.env.JWT_SECRET || "velto"}`).digest("hex"); }
+async function sendWhatsAppOtp(phone, code) {
+  const token = clean(process.env.META_WHATSAPP_TOKEN, 4096);
+  const phoneNumberId = clean(process.env.META_WHATSAPP_PHONE_NUMBER_ID, 200);
+  const templateName = clean(process.env.META_WHATSAPP_OTP_TEMPLATE_NAME, 200);
+  const language = clean(process.env.META_WHATSAPP_OTP_TEMPLATE_LANG, 40) || "en_US";
+  const apiVersion = clean(process.env.META_WHATSAPP_API_VERSION, 40) || "v23.0";
+  if (!token || !phoneNumberId || !templateName) throw new Error("WhatsApp OTP non configuré");
+  const response = await fetch(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", to: phone.replace(/^\+/, ""), type: "template", template: { name: templateName, language: { code: language }, components: [{ type: "body", parameters: [{ type: "text", text: code }] }] } }),
+  });
+  const data = await response.json();
+  if (!response.ok) { console.error("WhatsApp OTP error:", data?.error?.message || response.status); throw new Error("Envoi WhatsApp impossible"); }
+  return data;
+}
+
 router.post("/phone/request", async (req, res) => {
-  const phone = clean(req.body?.phone, 30).replace(/[^+\d]/g, ""); if (!/^\+\d{8,15}$/.test(phone)) return res.status(400).json({ error: "Numéro international invalide. Exemple : +216XXXXXXXX" });
-  const key = `${req.ip || "unknown"}:${phone}`, now = Date.now(), previous = otpAttempts.get(key); if (previous && now - previous.startedAt < 15 * 60 * 1000 && previous.count >= 5) return res.status(429).json({ error: "Trop de demandes de code. Réessayez plus tard." });
+  const phone = normalizeWhatsAppPhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: "Numéro international invalide. Exemple : +216XXXXXXXX" });
+  const key = `${req.ip || "unknown"}:${phone}`, now = Date.now(), previous = otpAttempts.get(key);
+  if (previous && now - previous.startedAt < 15 * 60 * 1000 && previous.count >= 5) return res.status(429).json({ error: "Trop de demandes de code. Réessayez plus tard." });
   otpAttempts.set(key, previous && now - previous.startedAt < 15 * 60 * 1000 ? { startedAt: previous.startedAt, count: previous.count + 1 } : { startedAt: now, count: 1 });
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_VERIFY_SERVICE_SID) return res.status(503).json({ error: "La connexion par numéro nécessite la configuration SMS du serveur." });
-  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64"); const response = await fetch(`https://verify.twilio.com/v2/Services/${process.env.TWILIO_VERIFY_SERVICE_SID}/Verifications`, { method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ To: phone, Channel: "sms" }) });
-  const data = await response.json(); if (!response.ok) return res.status(502).json({ error: "Impossible d'envoyer le code SMS." }); res.json({ ok: true, status: data.status || "pending" });
+  const code = String(crypto.randomInt(100000, 1000000));
+  try {
+    await sendWhatsAppOtp(phone, code);
+    whatsappOtps.set(phone, { hash: otpHash(code), expiresAt: now + 5 * 60 * 1000, attempts: 0 });
+    res.json({ ok: true, channel: "whatsapp" });
+  } catch (error) {
+    res.status(503).json({ error: "La connexion par numéro nécessite la configuration WhatsApp OTP du serveur." });
+  }
 });
 router.post("/phone/verify", async (req, res) => {
-  const User = UserModel(); const phone = clean(req.body?.phone, 30).replace(/[^+\d]/g, ""), code = clean(req.body?.code, 10), role = roleFrom(req.body?.role); if (!/^\+\d{8,15}$/.test(phone) || !/^\d{4,8}$/.test(code)) return res.status(400).json({ error: "Numéro ou code invalide." });
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_VERIFY_SERVICE_SID) return res.status(503).json({ error: "La connexion par numéro nécessite la configuration SMS du serveur." });
-  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64"); const response = await fetch(`https://verify.twilio.com/v2/Services/${process.env.TWILIO_VERIFY_SERVICE_SID}/VerificationCheck`, { method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ To: phone, Code: code }) });
-  const data = await response.json(); if (!response.ok || data.status !== "approved") return res.status(401).json({ error: "Code incorrect ou expiré." });
-  let user = await User.findOne({ phone }); if (!user) { const randomPassword = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12); user = await User.create({ name: `Utilisateur ${phone.slice(-4)}`, email: `${phone.replace(/\D/g, "")}@phone.velto.local`, password: randomPassword, role, country: "TN", phone }); }
+  const User = UserModel(); const phone = normalizeWhatsAppPhone(req.body?.phone), code = clean(req.body?.code, 10), role = roleFrom(req.body?.role);
+  if (!phone || !/^\d{6}$/.test(code)) return res.status(400).json({ error: "Numéro ou code invalide." });
+  const pending = whatsappOtps.get(phone);
+  if (!pending || pending.expiresAt < Date.now()) { whatsappOtps.delete(phone); return res.status(401).json({ error: "Code incorrect ou expiré." }); }
+  if (pending.attempts >= 5) { whatsappOtps.delete(phone); return res.status(429).json({ error: "Trop de tentatives. Demandez un nouveau code." }); }
+  pending.attempts += 1;
+  if (pending.hash !== otpHash(code)) return res.status(401).json({ error: "Code incorrect ou expiré." });
+  whatsappOtps.delete(phone);
+  let user = await User.findOne({ phone });
+  if (!user) { const randomPassword = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12); user = await User.create({ name: `Utilisateur ${phone.slice(-4)}`, email: `${phone.replace(/\D/g, "")}@phone.velto.local`, password: randomPassword, role, country: "TN", phone }); }
   res.json({ token: signToken(user), user });
 });
 
