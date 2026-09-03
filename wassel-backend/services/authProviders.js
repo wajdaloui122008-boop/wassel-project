@@ -6,6 +6,7 @@ const { jwtVerify, createRemoteJWKSet } = require("jose");
 
 const originalExpress = express;
 const router = originalExpress.Router();
+router.use(originalExpress.json({ limit: "8kb" }));
 const states = new Map();
 const otpAttempts = new Map();
 const GOOGLE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
@@ -62,20 +63,20 @@ router.get("/apple", (req, res) => {
 });
 router.post("/apple/callback", async (req, res) => {
   try {
-    const state = takeState(req.body.state); if (!state) return redirectWithResult(res, { error: "Session Apple invalide ou expirée" });
-    const code = clean(req.body.code, 2000), clientId = clean(process.env.APPLE_CLIENT_ID, 300), clientSecret = clean(process.env.APPLE_CLIENT_SECRET, 2000);
+    const state = takeState(req.body?.state); if (!state) return redirectWithResult(res, { error: "Session Apple invalide ou expirée" });
+    const code = clean(req.body?.code, 2000), clientId = clean(process.env.APPLE_CLIENT_ID, 300), clientSecret = clean(process.env.APPLE_CLIENT_SECRET, 2000);
     if (!code || !clientId || !clientSecret) return redirectWithResult(res, { error: "Configuration Apple incomplète" });
     const tokenResponse = await fetch("https://appleid.apple.com/auth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: `${baseUrl()}/auth/apple/callback`, grant_type: "authorization_code" }) });
     const tokens = await tokenResponse.json(); if (!tokenResponse.ok || !tokens.id_token) throw new Error("Échange du code Apple refusé");
     const { payload } = await jwtVerify(tokens.id_token, APPLE_JWKS, { issuer: "https://appleid.apple.com", audience: clientId });
-    const name = req.body.user ? (() => { try { const u = JSON.parse(req.body.user); return `${u?.name?.firstName || ""} ${u?.name?.lastName || ""}`.trim(); } catch { return ""; } })() : "";
+    const name = req.body?.user ? (() => { try { const u = JSON.parse(req.body.user); return `${u?.name?.firstName || ""} ${u?.name?.lastName || ""}`.trim(); } catch { return ""; } })() : "";
     const result = await findOrCreate({ email: payload.email, name, role: state.role });
     redirectWithResult(res, { token: result.token, name: result.user.name, ok: "1" });
   } catch (error) { console.error("Apple auth error:", error.message); redirectWithResult(res, { error: "Connexion Apple impossible" }); }
 });
 
 router.post("/phone/request", async (req, res) => {
-  const phone = clean(req.body.phone, 30).replace(/[^+\d]/g, "");
+  const phone = clean(req.body?.phone, 30).replace(/[^+\d]/g, "");
   if (!/^\+\d{8,15}$/.test(phone)) return res.status(400).json({ error: "Numéro international invalide. Exemple : +216XXXXXXXX" });
   const key = `${req.ip || "unknown"}:${phone}`, now = Date.now(), previous = otpAttempts.get(key);
   if (previous && now - previous.startedAt < 15 * 60 * 1000 && previous.count >= 5) return res.status(429).json({ error: "Trop de demandes de code. Réessayez plus tard." });
@@ -88,7 +89,7 @@ router.post("/phone/request", async (req, res) => {
 });
 router.post("/phone/verify", async (req, res) => {
   const User = UserModel();
-  const phone = clean(req.body.phone, 30).replace(/[^+\d]/g, ""), code = clean(req.body.code, 10), role = roleFrom(req.body.role);
+  const phone = clean(req.body?.phone, 30).replace(/[^+\d]/g, ""), code = clean(req.body?.code, 10), role = roleFrom(req.body?.role);
   if (!/^\+\d{8,15}$/.test(phone) || !/^\d{4,8}$/.test(code)) return res.status(400).json({ error: "Numéro ou code invalide." });
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_VERIFY_SERVICE_SID) return res.status(503).json({ error: "La connexion par numéro nécessite la configuration SMS du serveur." });
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64");
