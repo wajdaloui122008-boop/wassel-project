@@ -16,7 +16,7 @@
     if (document.getElementById("phone-auth-panel")) return document.getElementById("phone-auth-panel");
     const form = document.querySelector("#login-form"); if (!form) return null;
     const panel = document.createElement("div"); panel.id = "phone-auth-panel"; panel.className = "phone-auth-panel hidden";
-    panel.innerHTML = `<div class="phone-auth-title">Connexion par numéro</div><label>Numéro de téléphone<input id="auth-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+216 XX XXX XXX"></label><div class="phone-code-row hidden" id="phone-code-row"><label>Code SMS<input id="auth-phone-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Code reçu par SMS"></label></div><div class="phone-auth-actions"><button type="button" class="btn-primary" id="phone-send-code">Recevoir le code</button><button type="button" class="btn-ghost" id="phone-cancel">Annuler</button></div><p class="form-error" id="phone-auth-error"></p>`;
+    panel.innerHTML = `<div class="phone-auth-title">Connexion par WhatsApp</div><label>Numéro WhatsApp<input id="auth-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+216 XX XXX XXX"></label><div class="phone-code-row hidden" id="phone-code-row"><label>Code reçu sur WhatsApp<input id="auth-phone-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Code reçu sur WhatsApp"></label></div><div class="phone-auth-actions"><button type="button" class="btn-primary" id="phone-send-code">Recevoir le code</button><button type="button" class="btn-ghost" id="phone-cancel">Annuler</button></div><p class="form-error" id="phone-auth-error"></p>`;
     form.querySelector(".oauth-row")?.after(panel);
     panel.querySelector("#phone-cancel").addEventListener("click", () => panel.classList.add("hidden"));
     panel.querySelector("#phone-send-code").addEventListener("click", requestOrVerifyPhone);
@@ -28,7 +28,7 @@
     try {
       if (codeRow.classList.contains("hidden")) {
         const res = await fetch(`${API_URL}/auth/phone/request`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) }); const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Impossible d'envoyer le code."); codeRow.classList.remove("hidden"); button.textContent = "Vérifier le code"; document.getElementById("auth-phone-code")?.focus();
+        if (!res.ok) throw new Error(data.error || "Impossible d'envoyer le code sur WhatsApp."); codeRow.classList.remove("hidden"); button.textContent = "Vérifier le code"; document.getElementById("auth-phone-code")?.focus();
       } else {
         const code = document.getElementById("auth-phone-code")?.value.trim() || ""; const res = await fetch(`${API_URL}/auth/phone/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, code, role: selectedRole() }) }); const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Code incorrect."); panel.classList.add("hidden"); onLoggedIn(data.user, data.token);
@@ -39,7 +39,7 @@
     injectStyles();
     document.querySelectorAll(".btn-oauth[data-provider]").forEach((button) => replaceButton(button, () => startProvider(button.dataset.provider.toLowerCase())));
     const loginForm = document.getElementById("login-form");
-    if (loginForm && !loginForm.querySelector(".btn-phone-auth")) { const row = loginForm.querySelector(".oauth-row"); const phoneButton = document.createElement("button"); phoneButton.type = "button"; phoneButton.className = "btn-oauth btn-phone-auth"; phoneButton.innerHTML = '<span class="oauth-icon">+216</span> Continuer avec mon numéro'; phoneButton.addEventListener("click", () => ensurePhonePanel()?.classList.remove("hidden")); row?.appendChild(phoneButton); }
+    if (loginForm && !loginForm.querySelector(".btn-phone-auth")) { const row = loginForm.querySelector(".oauth-row"); const phoneButton = document.createElement("button"); phoneButton.type = "button"; phoneButton.className = "btn-oauth btn-phone-auth"; phoneButton.innerHTML = '<span class="oauth-icon">+216</span> Continuer avec mon numéro WhatsApp'; phoneButton.addEventListener("click", () => ensurePhonePanel()?.classList.remove("hidden")); row?.appendChild(phoneButton); }
     if (params.has("auth")) {
       const authParams = new URLSearchParams(params.get("auth")), token = authParams.get("token"), error = authParams.get("error");
       if (token) fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).then((data) => { if (data.user) onLoggedIn(data.user, token); else showAuthError("Session d'authentification invalide."); }).catch(() => showAuthError("Impossible de restaurer la session.")); else if (error) showAuthError(error);
