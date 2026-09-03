@@ -3,24 +3,28 @@
 
   let deferredPrompt = null;
   let refreshing = false;
+  let registration = null;
 
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
       // Registration is enough for startup; do not block the page on a network update.
-      // The browser performs service-worker update checks according to its normal lifecycle.
+      // The browser performs normal update checks according to the service-worker lifecycle.
 
       navigator.serviceWorker.addEventListener("controllerchange", () => {
         if (refreshing) return;
         refreshing = true;
         window.location.reload();
       });
-
-      // Keep the registration alive for diagnostics without forcing a network request.
-      void registration;
     } catch (err) {
       console.warn("PWA service worker:", err);
     }
+  });
+
+  // Check for a newer worker when the user returns to the app, rather than on every startup.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !registration) return;
+    registration.update().catch(() => {});
   });
 
   window.addEventListener("beforeinstallprompt", event => {
