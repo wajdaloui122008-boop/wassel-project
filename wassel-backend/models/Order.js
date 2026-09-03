@@ -33,18 +33,17 @@ const orderSchema = new mongoose.Schema({
   cancelledAt: { type: Date, default: null },
   cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
 });
 orderSchema.index({ client: 1, createdAt: -1 });
 orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "dispatchOffers.driver": 1, "dispatchOffers.status": 1, "dispatchOffers.expiresAt": 1 });
-// A driver must never have two concurrent active deliveries. Keep an explicit name
-// so MongoDB/Mongoose can distinguish this constraint from the legacy livreur_1 index.
 orderSchema.index(
   { livreur: 1 },
   { name: "active_livreur_unique", unique: true, partialFilterExpression: { status: { $in: ["acceptee", "route"] }, livreur: { $type: "objectId" } } },
 );
-// Mongoose 9: middleware no longer receives callback-style `next` here.
+
 orderSchema.pre("save", function () {
   if (this.isNew && this.status && this.statusHistory.length === 0) {
     this.statusHistory.push({ status: this.status, at: this.createdAt || new Date() });
@@ -52,20 +51,28 @@ orderSchema.pre("save", function () {
     const last = this.statusHistory[this.statusHistory.length - 1];
     if (!last || last.status !== this.status) this.statusHistory.push({ status: this.status, at: new Date() });
   }
+  this.updatedAt = new Date();
 });
+
 orderSchema.pre("findOneAndUpdate", function () {
   const update = this.getUpdate() || {};
-  const nextStatus = update.$set?.status ?? update.status;
+  const now = new Date();
+  update.$set = update.$set || {};
+  update.$set.updatedAt = now;
+  const nextStatus = update.$set.status ?? update.status;
   if (VALID_STATUSES.includes(nextStatus)) {
     const push = update.$push || (update.$push = {});
-    push.statusHistory = { status: nextStatus, at: new Date() };
+    push.statusHistory = { status: nextStatus, at: now };
   }
+  this.setUpdate(update);
 });
+
 orderSchema.pre("validate", function () {
   if (this.serviceType === "colis" && typeof this.pkg === "string") {
     const match = this.pkg.match(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]/i);
     if (match) this.serviceType = match[1].toLowerCase();
   }
 });
+
 orderSchema.set("toJSON", { virtuals: true, transform: (doc, ret) => { delete ret._id; delete ret.__v; } });
 module.exports = mongoose.model("Order", orderSchema);
