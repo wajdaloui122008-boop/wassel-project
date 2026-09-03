@@ -1,278 +1,49 @@
 (() => {
   "use strict";
-
   const API = "https://wassel-backend-ds3n.onrender.com";
   const token = () => localStorage.getItem("velto_token") || "";
   const authHeaders = () => token() ? { Authorization: `Bearer ${token()}` } : {};
-
-  const menus = {
-    food: [
-      ["pizza-margherita", "Pizza Margherita", 12, "Tomate, mozzarella, basilic"],
-      ["pizza-4-fromages", "Pizza 4 Fromages", 17, "Mozzarella, emmental, bleu, parmesan"],
-      ["burger-classic", "Classic Burger", 14, "Bœuf, cheddar, salade, sauce maison"],
-      ["chicken-wrap", "Chicken Wrap", 11, "Poulet grillé, crudités, sauce"],
-      ["fries", "Frites", 5, "Frites croustillantes"],
-      ["soft-drink", "Boisson", 3, "Canette 33 cl"]
-    ].map(([id, name, price, desc]) => ({ id, name, price, desc })),
-    shop: [
-      ["shop-tshirt", "T-shirt", 25, "T-shirt unisexe"],
-      ["shop-jeans", "Jean", 65, "Jean classique"],
-      ["shop-sneakers", "Baskets", 90, "Baskets casual"],
-      ["shop-backpack", "Sac à dos", 45, "Sac à dos quotidien"],
-      ["shop-headphones", "Casque audio", 75, "Casque sans fil"],
-      ["shop-charger", "Chargeur USB-C", 18, "Chargeur secteur USB-C"]
-    ].map(([id, name, price, desc]) => ({ id, name, price, desc })),
-    market: [
-      ["market-milk", "Lait", 2.2, "1 L"],
-      ["market-bread", "Pain complet", 1.5, "Pièce"],
-      ["market-eggs", "Œufs", 4.8, "Boîte de 12"],
-      ["market-apples", "Pommes", 4.5, "1 kg"],
-      ["market-potatoes", "Pommes de terre", 2.8, "1 kg"],
-      ["market-water", "Eau", 3.6, "Pack 6 × 1,5 L"],
-      ["market-rice", "Riz", 4.2, "1 kg"],
-      ["market-tomatoes", "Tomates", 3.9, "1 kg"]
-    ].map(([id, name, price, desc]) => ({ id, name, price, desc }))
+  const restaurants = [
+    { id: "comptoir", name: "Le Comptoir", area: "Tunis Centre", icon: "🍽️", menu: [["margherita","Pizza Margherita",12,"Tomate, mozzarella, basilic"],["four-cheese","Pizza 4 Fromages",17,"Mozzarella, emmental, bleu, parmesan"],["burger","Classic Burger",14,"Bœuf, cheddar, salade, sauce maison"],["fries","Frites croustillantes",5,"Portion"],["drink","Boisson",3,"Canette 33 cl"]] },
+    { id: "carthage-bites", name: "Carthage Bites", area: "Lac 2", icon: "🥙", menu: [["wrap","Chicken Wrap",11,"Poulet grillé, crudités, sauce"],["shawarma","Shawarma Poulet",13,"Poulet mariné, salade, sauce"],["burger","Smash Burger",15,"Bœuf, cheddar, sauce maison"],["fries","Frites",5,"Frites croustillantes"],["drink","Boisson",3,"Canette 33 cl"]] },
+    { id: "medina-kitchen", name: "Medina Kitchen", area: "La Médina", icon: "🍲", menu: [["couscous","Couscous Poulet",16,"Couscous tunisien, légumes, poulet"],["ojja","Ojja Merguez",14,"Œufs, merguez, tomates, poivrons"],["brik","Brik à l'œuf",5,"Brik croustillante"],["salad","Salade Tunisienne",7,"Tomate, concombre, olive, thon"],["drink","Boisson",3,"Canette 33 cl"]] }
+  ].map(r => ({ ...r, menu: r.menu.map(([id,name,price,desc]) => ({id,name,price,desc})) }));
+  const catalogs = {
+    shop: [["tshirt","T-shirt",25,"T-shirt unisexe"],["jeans","Jean",65,"Jean classique"],["sneakers","Baskets",90,"Baskets casual"],["backpack","Sac à dos",45,"Sac à dos quotidien"],["headphones","Casque audio",75,"Casque sans fil"],["charger","Chargeur USB-C",18,"Chargeur secteur USB-C"]],
+    market: [["milk","Lait",2.2,"1 L"],["bread","Pain complet",1.5,"Pièce"],["eggs","Œufs",4.8,"Boîte de 12"],["apples","Pommes",4.5,"1 kg"],["potatoes","Pommes de terre",2.8,"1 kg"],["water","Eau",3.6,"Pack 6 × 1,5 L"],["rice","Riz",4.2,"1 kg"],["tomatoes","Tomates",3.9,"1 kg"]]
   };
+  Object.keys(catalogs).forEach(k => catalogs[k] = catalogs[k].map(([id,name,price,desc]) => ({id,name,price,desc})));
+  const meta = { shop:{icon:"🛍️",title:"Shop",subtitle:"Choisissez vos produits et faites-les livrer.",pickup:"Magasin",placeholder:"Ex: Shop Velto, Tunis"}, market:{icon:"🛒",title:"Market",subtitle:"Faites vos courses et recevez-les à domicile.",pickup:"Magasin",placeholder:"Ex: Marché, Tunis"} };
+  function notify(message,good=false){let el=document.getElementById("velto-service-toast");if(!el){el=document.createElement("div");el.id="velto-service-toast";el.style.cssText="position:fixed;right:20px;bottom:20px;z-index:100000;padding:14px 18px;border-radius:14px;background:#211d18;color:#fff;box-shadow:0 12px 35px rgba(0,0,0,.2);font:600 13px Inter,Arial";document.body.appendChild(el);}el.textContent=message;el.style.border=good?"1px solid #d6b25e":"1px solid rgba(255,255,255,.15)";clearTimeout(el._timer);el._timer=setTimeout(()=>el.remove(),3500);}
+  async function json(r){try{return await r.json();}catch{return {};}}
+  function coords(v){const m=String(v||"").match(/^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*$/);if(!m)return null;const lat=Number(m[1]),lng=Number(m[2]);return Number.isFinite(lat)&&Number.isFinite(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180?{lat,lng}:null;}
+  async function geocode(v){const c=coords(v),q=String(v||"").trim();if(c)return c;if(!q)throw new Error("Adresse obligatoire.");const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,{headers:{Accept:"application/json"}});if(!r.ok)throw new Error("Service de localisation indisponible.");const d=await r.json();if(!d[0])throw new Error(`Adresse introuvable : ${q}`);return{lat:Number(d[0].lat),lng:Number(d[0].lon)};}
+  async function createOrder(payload){const r=await fetch(`${API}/orders`,{method:"POST",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(payload)});const result=await json(r);if(!r.ok)throw new Error(result.error||"Impossible d'envoyer la commande.");return result;}
+  function gpsButton(){return `<button type="button" class="btn-ghost service-gps">◎ Utiliser ma position</button>`;}
+  function attachLocation(form){const b=form?.querySelector(".service-gps");if(!b)return;b.onclick=()=>{if(!navigator.geolocation)return notify("La géolocalisation n'est pas disponible.");b.disabled=true;b.textContent="Localisation…";navigator.geolocation.getCurrentPosition(p=>{if(form.elements.pickup)form.elements.pickup.value=`${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)}`;b.disabled=false;b.textContent="✓ Position utilisée";notify("Position GPS ajoutée",true);},()=>{b.disabled=false;b.textContent="◎ Utiliser ma position";notify("Impossible d'obtenir votre position.");},{enableHighAccuracy:true,timeout:10000,maximumAge:5000});};}
+  function payments(root,state){root.querySelectorAll("[data-payment]").forEach(b=>b.onclick=()=>{state.payment=b.dataset.payment;root.querySelectorAll("[data-payment]").forEach(x=>x.classList.toggle("active",x===b));});}
+  function paymentHtml(p){return `<div class="payment-toggle service-payment"><button type="button" class="payment-option ${p==="especes"?"active":""}" data-payment="especes">💵 Espèces</button><button type="button" class="payment-option ${p==="carte"?"active":""}" data-payment="carte">💳 Carte</button><button type="button" class="payment-option ${p==="wallet"?"active":""}" data-payment="wallet">👛 Wallet</button></div>`;}
 
-  const meta = {
-    food: { icon: "🍔", title: "Commander à manger", subtitle: "Choisissez vos plats puis faites-vous livrer.", pickup: "Restaurant", pickupPlaceholder: "Ex: Le Comptoir, Tunis" },
-    shop: { icon: "🛍️", title: "Shop", subtitle: "Choisissez vos produits et faites-les livrer.", pickup: "Magasin", pickupPlaceholder: "Ex: Shop Velto, Tunis" },
-    market: { icon: "🛒", title: "Market", subtitle: "Faites vos courses et recevez-les à domicile.", pickup: "Magasin", pickupPlaceholder: "Ex: Marché, Tunis" }
-  };
-
-  function notify(message, good = false) {
-    let el = document.getElementById("velto-service-toast");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "velto-service-toast";
-      el.style.cssText = "position:fixed;right:20px;bottom:20px;z-index:100000;padding:14px 18px;border-radius:14px;background:#211d18;color:#fff;box-shadow:0 12px 35px rgba(0,0,0,.2);font:600 13px Inter,Arial";
-      document.body.appendChild(el);
-    }
-    el.textContent = message;
-    el.style.border = good ? "1px solid #d6b25e" : "1px solid rgba(255,255,255,.15)";
-    clearTimeout(el._timer);
-    el._timer = setTimeout(() => el.remove(), 3500);
+  function mountFood(panel){
+    if(!panel||panel.dataset.serviceReady==="1")return;panel.dataset.serviceReady="1";let restaurant=null,cart=new Map(),payment="especes";
+    const list=()=>{panel.innerHTML=`<div class="glass-panel form-panel"><div style="font-size:38px">🍔</div><h1>Commander à manger</h1><p class="subtitle">Choisissez un restaurant puis composez votre panier.</p><div style="display:grid;gap:10px;margin-top:18px">${restaurants.map(r=>`<button type="button" class="order-card service-restaurant" data-restaurant="${r.id}" style="text-align:left;display:flex;align-items:center;gap:14px"><span style="font-size:30px">${r.icon}</span><span><b>${r.name}</b><small style="display:block;opacity:.7">${r.area} · ${r.menu.length} produits</small></span><span style="margin-left:auto">›</span></button>`).join("")}</div></div>`;panel.querySelectorAll(".service-restaurant").forEach(b=>b.onclick=()=>{restaurant=restaurants.find(r=>r.id===b.dataset.restaurant);cart=new Map();menu();});};
+    const menu=()=>{panel.innerHTML=`<div class="two-col"><div class="glass-panel form-panel"><button type="button" class="btn-ghost service-back">← Restaurants</button><div style="font-size:38px">${restaurant.icon}</div><h1>${restaurant.name}</h1><p class="subtitle">${restaurant.area}</p><div style="display:grid;gap:10px;margin-top:16px">${restaurant.menu.map(i=>`<button type="button" class="order-card service-product" data-product="${i.id}" style="text-align:left;display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%"><span><b>${i.name}</b><small style="display:block;opacity:.7">${i.desc}</small></span><strong>${i.price.toFixed(2)} TND</strong></button>`).join("")}</div></div><div class="glass-panel"><h2>Votre panier</h2><div class="service-cart"></div></div></div>`;panel.querySelector(".service-back").onclick=list;panel.querySelectorAll(".service-product").forEach(b=>b.onclick=()=>{const i=restaurant.menu.find(x=>x.id===b.dataset.product);const r=cart.get(i.id)||{item:i,qty:0};r.qty++;cart.set(i.id,r);cartView();});cartView();};
+    const cartView=()=>{const el=panel.querySelector(".service-cart");if(!el)return;const rows=[...cart.values()];if(!rows.length){el.innerHTML=`<p class="empty-state">Votre panier est vide.</p>`;return;}const total=rows.reduce((s,r)=>s+r.item.price*r.qty,0);el.innerHTML=rows.map(r=>`<div class="order-card" style="margin-bottom:8px;display:flex;align-items:center;gap:8px"><div style="flex:1"><b>${r.item.name}</b> × ${r.qty}<small style="display:block;opacity:.7">${(r.item.price*r.qty).toFixed(2)} TND</small></div><button type="button" data-minus="${r.item.id}">−</button><button type="button" data-plus="${r.item.id}">+</button></div>`).join("")+`<div style="display:flex;justify-content:space-between;margin-top:14px"><b>Total produits</b><b>${total.toFixed(2)} TND</b></div><form class="catalog-checkout" style="margin-top:16px"><label>Restaurant<input value="${restaurant.name}" readonly></label><label>Adresse de livraison<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label>${gpsButton()}${paymentHtml(payment)}<button class="btn-primary" type="submit">Commander · ${total.toFixed(2)} TND</button><p class="form-error service-error"></p></form>`;el.querySelectorAll("[data-minus]").forEach(b=>b.onclick=()=>{const r=cart.get(b.dataset.minus);if(r.qty>1)r.qty--;else cart.delete(b.dataset.minus);cartView();});el.querySelectorAll("[data-plus]").forEach(b=>b.onclick=()=>{const r=cart.get(b.dataset.plus);if(r)r.qty++;cartView();});const form=el.querySelector("form");attachLocation(form);payments(form,{get payment(){return payment;},set payment(v){payment=v;}});form.onsubmit=async e=>{e.preventDefault();const error=form.querySelector(".service-error"),submit=form.querySelector("button[type=submit]"),data=new FormData(form);try{submit.disabled=true;submit.textContent="Préparation…";const dropoff=String(data.get("dropoff")||"").trim(),pickup=`${restaurant.name}, ${restaurant.area}`;const[pickupLocation,dropoffLocation]=await Promise.all([geocode(pickup),geocode(dropoff)]);const detail=rows.map(r=>`${r.qty}× ${r.item.name}`).join(", ");await createOrder({serviceType:"food",pickup,dropoff,pkg:`[FOOD] ${restaurant.name} — ${detail}`,paymentMethod:payment,pickupLocation,dropoffLocation,itemsTotal:Number(total.toFixed(2))});notify("Commande envoyée avec succès",true);cart.clear();cartView();window.__veltoRefreshOrders?.();}catch(err){error.textContent=err.message||"Erreur inattendue.";notify(error.textContent);}finally{submit.disabled=false;submit.textContent=`Commander · ${total.toFixed(2)} TND`;}};};
+    list();
   }
 
-  async function readJson(response) {
-    try { return await response.json(); } catch { return {}; }
+  function mountCatalog(category,panel){
+    if(!panel||panel.dataset.serviceReady==="1")return;panel.dataset.serviceReady="1";const info=meta[category],menu=catalogs[category],cart=new Map();let payment="especes";
+    const render=()=>{panel.innerHTML=`<div class="two-col"><div class="glass-panel form-panel"><div style="font-size:38px">${info.icon}</div><h1>${info.title}</h1><p class="subtitle">${info.subtitle}</p><div style="display:grid;gap:10px;margin-top:16px">${menu.map(i=>`<button type="button" class="order-card service-product" data-product="${i.id}" style="text-align:left;display:flex;justify-content:space-between;align-items:center;width:100%"><span><b>${i.name}</b><small style="display:block;opacity:.7">${i.desc}</small></span><strong>${i.price.toFixed(2)} TND</strong></button>`).join("")}</div></div><div class="glass-panel"><h2>Votre panier</h2><div class="service-cart"></div></div></div>`;panel.querySelectorAll(".service-product").forEach(b=>b.onclick=()=>{const i=menu.find(x=>x.id===b.dataset.product),r=cart.get(i.id)||{item:i,qty:0};r.qty++;cart.set(i.id,r);cartView();});cartView();};
+    const cartView=()=>{const el=panel.querySelector(".service-cart");if(!el)return;const rows=[...cart.values()];if(!rows.length){el.innerHTML=`<p class="empty-state">Votre panier est vide.</p>`;return;}const total=rows.reduce((s,r)=>s+r.item.price*r.qty,0);el.innerHTML=rows.map(r=>`<div class="order-card" style="margin-bottom:8px;display:flex;align-items:center;gap:8px"><div style="flex:1"><b>${r.item.name}</b> × ${r.qty}<small style="display:block;opacity:.7">${(r.item.price*r.qty).toFixed(2)} TND</small></div><button type="button" data-minus="${r.item.id}">−</button><button type="button" data-plus="${r.item.id}">+</button></div>`).join("")+`<div style="display:flex;justify-content:space-between;margin-top:14px"><b>Total produits</b><b>${total.toFixed(2)} TND</b></div><form class="catalog-checkout" style="margin-top:16px"><label>${info.pickup}<input name="pickup" required maxlength="250" placeholder="${info.placeholder}"></label>${gpsButton()}<label>Adresse de livraison<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label>${paymentHtml(payment)}<button class="btn-primary" type="submit">Commander · ${total.toFixed(2)} TND</button><p class="form-error service-error"></p></form>`;el.querySelectorAll("[data-minus]").forEach(b=>b.onclick=()=>{const r=cart.get(b.dataset.minus);if(r.qty>1)r.qty--;else cart.delete(b.dataset.minus);cartView();});el.querySelectorAll("[data-plus]").forEach(b=>b.onclick=()=>{const r=cart.get(b.dataset.plus);if(r)r.qty++;cartView();});const form=el.querySelector("form");attachLocation(form);payments(form,{get payment(){return payment;},set payment(v){payment=v;}});form.onsubmit=async e=>{e.preventDefault();const error=form.querySelector(".service-error"),submit=form.querySelector("button[type=submit]"),data=new FormData(form);try{submit.disabled=true;submit.textContent="Préparation…";const pickup=String(data.get("pickup")||"").trim(),dropoff=String(data.get("dropoff")||"").trim();const[pickupLocation,dropoffLocation]=await Promise.all([geocode(pickup),geocode(dropoff)]);const detail=rows.map(r=>`${r.qty}× ${r.item.name}`).join(", ");await createOrder({serviceType:category,pickup,dropoff,pkg:`[${category.toUpperCase()}] ${detail}`,paymentMethod:payment,pickupLocation,dropoffLocation,itemsTotal:Number(total.toFixed(2))});notify(`Commande ${category} envoyée avec succès`,true);cart.clear();cartView();window.__veltoRefreshOrders?.();}catch(err){error.textContent=err.message||"Erreur inattendue.";notify(error.textContent);}finally{submit.disabled=false;submit.textContent=`Commander · ${total.toFixed(2)} TND`;}};};
+    render();
   }
 
-  function parseCoordinates(value) {
-    const match = String(value || "").match(/^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*$/);
-    if (!match) return null;
-    const lat = Number(match[1]);
-    const lng = Number(match[2]);
-    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 ? { lat, lng } : null;
+  function mountTaxi(panel){
+    if(!panel||panel.dataset.serviceReady==="1")return;panel.dataset.serviceReady="1";let payment="especes";
+    panel.innerHTML=`<div class="two-col"><div class="glass-panel form-panel"><div style="font-size:38px">🚕</div><h1>Réserver un Taxi</h1><p class="subtitle">Demandez un chauffeur depuis votre position vers votre destination.</p><form class="taxi-service-form"><label>Point de départ<input name="pickup" required maxlength="250" placeholder="Ex: Avenue Habib Bourguiba, Tunis"></label>${gpsButton()}<label>Destination<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label><label>Détails<input name="detail" maxlength="250" placeholder="Ex: 2 passagers · bagages optionnels"></label>${paymentHtml(payment)}<button class="btn-primary" type="submit">Demander un taxi</button><p class="form-error service-error"></p></form></div><div class="glass-panel"><h2>Comment ça marche ?</h2><p>1. Indiquez le départ et la destination.</p><p>2. Velto cherche un chauffeur disponible.</p><p>3. Suivez la course depuis votre tableau de bord.</p></div></div>`;
+    const form=panel.querySelector("form");attachLocation(form);payments(form,{get payment(){return payment;},set payment(v){payment=v;}});form.onsubmit=async e=>{e.preventDefault();const error=form.querySelector(".service-error"),submit=form.querySelector("button[type=submit]"),data=new FormData(form);try{submit.disabled=true;submit.textContent="Recherche d'un chauffeur…";const pickup=String(data.get("pickup")||"").trim(),dropoff=String(data.get("dropoff")||"").trim(),detail=String(data.get("detail")||"").trim()||"Taxi";const[pickupLocation,dropoffLocation]=await Promise.all([geocode(pickup),geocode(dropoff)]);await createOrder({serviceType:"taxi",pickup,dropoff,pkg:`[TAXI] ${detail}`,paymentMethod:payment,pickupLocation,dropoffLocation});notify("Demande de taxi envoyée",true);form.reset();payment="especes";form.querySelector('[data-payment="especes"]').classList.add("active");window.__veltoRefreshOrders?.();}catch(err){error.textContent=err.message||"Erreur inattendue.";notify(error.textContent);}finally{submit.disabled=false;submit.textContent="Demander un taxi";}};
   }
-
-  async function geocode(value) {
-    const coords = parseCoordinates(value);
-    if (coords) return coords;
-    const query = String(value || "").trim();
-    if (!query) throw new Error("Adresse obligatoire.");
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`, { headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error("Service de localisation indisponible.");
-    const data = await response.json();
-    if (!data[0]) throw new Error(`Adresse introuvable : ${query}`);
-    return { lat: Number(data[0].lat), lng: Number(data[0].lon) };
-  }
-
-  function paymentButtons(selected) {
-    return `<div class="payment-toggle service-payment">
-      <button type="button" class="payment-option ${selected === "especes" ? "active" : ""}" data-payment="especes">💵 Espèces</button>
-      <button type="button" class="payment-option ${selected === "carte" ? "active" : ""}" data-payment="carte">💳 Carte</button>
-      <button type="button" class="payment-option ${selected === "wallet" ? "active" : ""}" data-payment="wallet">👛 Wallet</button>
-    </div>`;
-  }
-
-  function productButton(item, icon) {
-    return `<button type="button" class="order-card service-product" data-product="${item.id}" style="text-align:left;display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%">
-      <span style="display:flex;gap:10px;align-items:center"><span style="font-size:25px">${icon}</span><span><b>${item.name}</b><small style="display:block;opacity:.7">${item.desc}</small></span></span>
-      <strong>${item.price.toFixed(2)} TND</strong>
-    </button>`;
-  }
-
-  function mountCatalog(category, panel) {
-    if (!panel || panel.dataset.serviceReady === "1") return;
-    panel.dataset.serviceReady = "1";
-    const info = meta[category];
-    const menu = menus[category];
-    const icon = category === "food" ? "🍔" : category === "shop" ? "🛍️" : "🛒";
-    const cart = new Map();
-    let payment = "especes";
-
-    panel.innerHTML = `<div class="two-col">
-      <div class="glass-panel form-panel">
-        <div style="font-size:38px">${info.icon}</div>
-        <h1>${info.title}</h1>
-        <p class="subtitle">${info.subtitle}</p>
-        <div style="display:grid;gap:10px;margin:16px 0">${menu.map(item => productButton(item, icon)).join("")}</div>
-      </div>
-      <div class="glass-panel"><h2>Votre panier</h2><div class="service-cart"><p class="empty-state">Votre panier est vide.</p></div></div>
-    </div>`;
-
-    const render = () => {
-      const cartEl = panel.querySelector(".service-cart");
-      const rows = [...cart.values()];
-      if (!rows.length) {
-        cartEl.innerHTML = `<p class="empty-state">Votre panier est vide.</p>`;
-        return;
-      }
-      const total = rows.reduce((sum, row) => sum + row.item.price * row.qty, 0);
-      cartEl.innerHTML = rows.map(row => `<div class="order-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
-        <div style="flex:1"><b>${row.item.name}</b><span> × ${row.qty}</span><small style="display:block;opacity:.7">${(row.item.price * row.qty).toFixed(2)} TND</small></div>
-        <button type="button" data-minus="${row.item.id}">−</button><button type="button" data-plus="${row.item.id}">+</button>
-      </div>`).join("") + `<div style="display:flex;justify-content:space-between;margin-top:14px"><b>Total produits</b><b>${total.toFixed(2)} TND</b></div>
-      <form class="catalog-checkout" style="margin-top:16px">
-        <label>${info.pickup}<input name="pickup" required maxlength="250" placeholder="${info.pickupPlaceholder}"></label>
-        <label>Adresse de livraison<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label>
-        ${paymentButtons(payment)}
-        <button class="btn-primary" type="submit">Commander · ${total.toFixed(2)} TND</button>
-        <p class="form-error service-error"></p>
-      </form>`;
-
-      cartEl.querySelectorAll("[data-minus]").forEach(button => button.onclick = () => {
-        const row = cart.get(button.dataset.minus);
-        if (!row) return;
-        if (row.qty > 1) row.qty -= 1; else cart.delete(button.dataset.minus);
-        render();
-      });
-      cartEl.querySelectorAll("[data-plus]").forEach(button => button.onclick = () => {
-        const row = cart.get(button.dataset.plus);
-        if (row) row.qty += 1;
-        render();
-      });
-      cartEl.querySelectorAll("[data-payment]").forEach(button => button.onclick = () => {
-        payment = button.dataset.payment;
-        cartEl.querySelectorAll("[data-payment]").forEach(b => b.classList.toggle("active", b === button));
-      });
-      cartEl.querySelector(".catalog-checkout").onsubmit = async event => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const error = form.querySelector(".service-error");
-        const submit = form.querySelector("button[type=submit]");
-        const data = new FormData(form);
-        try {
-          error.textContent = "";
-          submit.disabled = true;
-          submit.textContent = "Préparation…";
-          const pickup = String(data.get("pickup") || "").trim();
-          const dropoff = String(data.get("dropoff") || "").trim();
-          const [pickupLocation, dropoffLocation] = await Promise.all([geocode(pickup), geocode(dropoff)]);
-          const detail = rows.map(row => `${row.qty}× ${row.item.name}`).join(", ");
-          const response = await fetch(`${API}/orders`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify({ serviceType: category, pickup, dropoff, pkg: `[${category.toUpperCase()}] ${detail}`, paymentMethod: payment, pickupLocation, dropoffLocation })
-          });
-          const result = await readJson(response);
-          if (!response.ok) throw new Error(result.error || "Impossible d'envoyer la commande.");
-          notify(`Commande ${category} envoyée avec succès`, true);
-          cart.clear();
-          render();
-          window.__veltoRefreshOrders?.();
-        } catch (err) {
-          error.textContent = err.message || "Erreur inattendue.";
-          notify(error.textContent);
-        } finally {
-          submit.disabled = false;
-          submit.textContent = `Commander · ${total.toFixed(2)} TND`;
-        }
-      };
-    };
-
-    panel.querySelectorAll(".service-product").forEach(button => button.onclick = () => {
-      const item = menu.find(entry => entry.id === button.dataset.product);
-      if (!item) return;
-      const row = cart.get(item.id) || { item, qty: 0 };
-      row.qty += 1;
-      cart.set(item.id, row);
-      render();
-    });
-  }
-
-  function mountTaxi(panel) {
-    if (!panel || panel.dataset.serviceReady === "1") return;
-    panel.dataset.serviceReady = "1";
-    let payment = "especes";
-    panel.innerHTML = `<div class="two-col">
-      <div class="glass-panel form-panel">
-        <div style="font-size:38px">🚕</div><h1>Réserver un Taxi</h1>
-        <p class="subtitle">Demandez un chauffeur depuis votre position vers votre destination.</p>
-        <form class="taxi-service-form">
-          <label>Point de départ<input name="pickup" required maxlength="250" placeholder="Ex: Avenue Habib Bourguiba, Tunis"></label>
-          <button type="button" class="btn-ghost" data-use-gps>◎ Utiliser ma position</button>
-          <label>Destination<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label>
-          <label>Détails<input name="detail" maxlength="250" placeholder="Ex: 2 passagers · bagages optionnels"></label>
-          ${paymentButtons(payment)}
-          <button class="btn-primary" type="submit">Demander un taxi</button>
-          <p class="form-error service-error"></p>
-        </form>
-      </div>
-      <div class="glass-panel"><h2>Comment ça marche ?</h2><p>1. Indiquez le départ et la destination.</p><p>2. Velto cherche un chauffeur disponible.</p><p>3. Suivez la course depuis votre tableau de bord.</p></div>
-    </div>`;
-
-    const form = panel.querySelector(".taxi-service-form");
-    form.querySelector("[data-use-gps]").onclick = () => navigator.geolocation?.getCurrentPosition(position => {
-      form.elements.pickup.value = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
-      notify("Position GPS ajoutée", true);
-    }, () => notify("Impossible d'obtenir votre position."));
-    form.querySelectorAll("[data-payment]").forEach(button => button.onclick = () => {
-      payment = button.dataset.payment;
-      form.querySelectorAll("[data-payment]").forEach(b => b.classList.toggle("active", b === button));
-    });
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const error = form.querySelector(".service-error");
-      const submit = form.querySelector("button[type=submit]");
-      const data = new FormData(form);
-      try {
-        error.textContent = "";
-        submit.disabled = true;
-        submit.textContent = "Recherche d'un chauffeur…";
-        const pickup = String(data.get("pickup") || "").trim();
-        const dropoff = String(data.get("dropoff") || "").trim();
-        const detail = String(data.get("detail") || "").trim() || "Taxi";
-        const [pickupLocation, dropoffLocation] = await Promise.all([geocode(pickup), geocode(dropoff)]);
-        const response = await fetch(`${API}/orders`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify({ serviceType: "taxi", pickup, dropoff, pkg: `[TAXI] ${detail}`, paymentMethod: payment, pickupLocation, dropoffLocation })
-        });
-        const result = await readJson(response);
-        if (!response.ok) throw new Error(result.error || "Impossible de demander le taxi.");
-        notify("Demande de taxi envoyée", true);
-        form.reset();
-        form.querySelector('[data-payment="especes"]').classList.add("active");
-        payment = "especes";
-        window.__veltoRefreshOrders?.();
-      } catch (err) {
-        error.textContent = err.message || "Erreur inattendue.";
-        notify(error.textContent);
-      } finally {
-        submit.disabled = false;
-        submit.textContent = "Demander un taxi";
-      }
-    };
-  }
-      }
-    };
-  }
-
-  function mountAll() {
-    const mounts = [
-      ["food", document.getElementById("category-food")],
-      ["taxi", document.getElementById("category-taxi")],
-      ["shop", document.getElementById("category-shop")],
-      ["market", document.getElementById("category-market")]
-    ];
-    mounts.forEach(([category, panel]) => {
-      if (category === "taxi") mountTaxi(panel);
-      else mountCatalog(category, panel);
-    });
-  }
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountAll, { once: true });
-  else mountAll();
+  function mountAll(){[["food","category-food"],["taxi","category-taxi"],["shop","category-shop"],["market","category-market"]].forEach(([type,id])=>{const p=document.getElementById(id);if(type==="food")mountFood(p);else if(type==="taxi")mountTaxi(p);else mountCatalog(type,p);});}
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",mountAll,{once:true});else mountAll();
 })();
