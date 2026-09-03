@@ -71,8 +71,15 @@ function attachRealtime(server) {
   const tick = async () => {
     if (shuttingDown || mongoose.connection.readyState !== 1) return;
     try {
-      const active = await Order.find({ status: { $in: ["acceptee", "route"] }, livreur: { $ne: null } })
-        .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory")
+      const now = Date.now();
+      const recentTerminalCutoff = new Date(now - 15000);
+      const active = await Order.find({
+        $or: [
+          { status: { $in: ["acceptee", "route"] }, livreur: { $ne: null } },
+          { status: { $in: ["livree", "annulee"] }, updatedAt: { $gte: recentTerminalCutoff } },
+        ],
+      })
+        .select("client livreur status serviceType pickupLocation dropoffLocation distanceKm estimatedDurationMin currency paymentStatus statusHistory updatedAt")
         .populate("livreur", "name location isOnline isAvailable")
         .lean();
 
@@ -88,7 +95,6 @@ function attachRealtime(server) {
         }
       }
 
-      const now = Date.now();
       const offerOrders = await Order.find({
         status: "nouvelle",
         "dispatchOffers.status": "offered",
