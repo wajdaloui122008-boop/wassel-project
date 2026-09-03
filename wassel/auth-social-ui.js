@@ -11,7 +11,7 @@
   function selectedRole() { return document.querySelector(".role-card.selected")?.dataset.role || "client"; }
   function replaceButton(button, handler) { const clone = button.cloneNode(true); button.replaceWith(clone); clone.addEventListener("click", handler); return clone; }
   function showAuthError(message) { const activeForm = document.querySelector("#login-form:not(.hidden), #register-form:not(.hidden)"); const el = activeForm?.querySelector(".form-error"); if (el) el.textContent = message; else alert(message); }
-  function startProvider(provider) { const mode = document.querySelector("#login-form:not(.hidden)") ? "login" : "register"; const role = mode === "register" ? selectedRole() : "client"; if (mode === "register" && !document.querySelector(".role-card.selected")) return showAuthError("Choisissez votre rôle avant de continuer."); window.location.href = `${API_URL}/auth/${provider}?mode=${mode}&role=${encodeURIComponent(role)}`; }
+  function startProvider(provider) { const mode = document.querySelector("#login-form:not(.hidden)") ? "login" : "register"; const role = selectedRole(); if (mode === "register" && !document.querySelector(".role-card.selected")) return showAuthError("Choisissez votre rôle avant de continuer."); window.location.href = `${API_URL}/auth/${provider}?mode=${mode}&role=${encodeURIComponent(role)}`; }
   function ensurePhonePanel() {
     if (document.getElementById("phone-auth-panel")) return document.getElementById("phone-auth-panel");
     const form = document.querySelector("#login-form"); if (!form) return null;
