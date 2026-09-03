@@ -32,5 +32,9 @@
       el.addEventListener('pointerenter', () => el.classList.add('glass-hover'), { passive: true });
       el.addEventListener('pointerleave', () => el.classList.remove('glass-hover'), { passive: true });
     });
+    const script = document.createElement('script');
+    script.src = 'auth-social-ui.js';
+    script.defer = true;
+    document.body.appendChild(script);
   });
 })();
