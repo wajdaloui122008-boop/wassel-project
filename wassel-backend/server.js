@@ -10,6 +10,10 @@ const paymentRouter = require("./services/payments/paymentRouter");
 const paymentWebhookRouter = require("./services/payments/webhookRouter");
 const { requireAuth, requireRole, JWT_SECRET } = require("./middleware/auth");
 const { requireDriver } = require("./services/driverRole");
+// Render currently starts the service with `node server.js`, so do not rely on
+// package.json preload flags for the realtime gateway and dispatch worker.
+require("./services/realtimeBootstrap");
+require("./services/dispatchQueueBootstrap");
 const app = express();
 app.disable("x-powered-by");
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://wassel-project.vercel.app,http://localhost:3000,http://127.0.0.1:3000").split(",").map((origin) => origin.trim()).filter(Boolean);
