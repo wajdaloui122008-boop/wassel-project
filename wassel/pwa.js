@@ -7,13 +7,17 @@
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-      await registration.update();
+      // Registration is enough for startup; do not block the page on a network update.
+      // The browser performs service-worker update checks according to its normal lifecycle.
 
       navigator.serviceWorker.addEventListener("controllerchange", () => {
         if (refreshing) return;
         refreshing = true;
         window.location.reload();
       });
+
+      // Keep the registration alive for diagnostics without forcing a network request.
+      void registration;
     } catch (err) {
       console.warn("PWA service worker:", err);
     }
