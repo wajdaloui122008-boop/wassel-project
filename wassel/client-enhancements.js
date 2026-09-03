@@ -31,14 +31,16 @@
 
   function renderOrder(order) {
     const type = inferType(order);
+    const orderId = String(order.id || order._id || "");
     const payment = paymentLabels[order.paymentMethod] || order.paymentMethod || "Espèces";
     const canCancel = order.status === "nouvelle" || order.status === "acceptee";
     const date = order.createdAt ? new Date(order.createdAt).toLocaleString("fr-TN", { dateStyle: "short", timeStyle: "short" }) : "";
     const card = document.createElement("article");
     card.className = "order-card";
+    card.dataset.orderId = orderId;
     card.innerHTML = `
       <div class="order-card-head">
-        <span class="order-id">#${esc(String(order.id || order._id || "").slice(-6).toUpperCase())}</span>
+        <span class="order-id">#${esc(orderId.slice(-6).toUpperCase())}</span>
         <span class="order-status">${esc(labels[order.status] || order.status)}</span>
       </div>
       <div class="route">
@@ -49,7 +51,7 @@
       <p class="package-desc">${esc(serviceLabels[type])} · ${esc(String(order.pkg || "").replace(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]\s*/i, ""))}</p>
       <p class="fee-line">${Number(order.fee || 0).toFixed(2)} TND · ${esc(payment)}${date ? ` · ${esc(date)}` : ""}</p>
       ${order.status === "annulee" && order.cancellationReason ? `<p class="fee-line">Motif: ${esc(order.cancellationReason)}</p>` : ""}
-      <div class="order-actions">${canCancel ? `<button class="btn-ghost js-client-cancel" data-id="${esc(order.id || order._id)}">Annuler</button>` : ""}</div>
+      <div class="order-actions">${canCancel ? `<button class="btn-ghost js-client-cancel" data-id="${esc(orderId)}">Annuler</button>` : ""}</div>
     `;
     const btn = card.querySelector(".js-client-cancel");
     if (btn) btn.addEventListener("click", async () => {
@@ -72,7 +74,7 @@
     if (!container || !token() || refreshInFlight) return;
     refreshInFlight = true;
     try {
-      const orders = await api("/orders");
+      const orders = await api("/orders?limit=50");
       if (!Array.isArray(orders)) return;
       container.innerHTML = "";
       if (!orders.length) {
@@ -80,6 +82,7 @@
         return;
       }
       orders.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).forEach((order) => container.appendChild(renderOrder(order)));
+      window.dispatchEvent(new CustomEvent("velto:orders-rendered", { detail: { count: orders.length } }));
     } catch (err) {
       console.warn("Velto client history:", err.message);
     } finally {
