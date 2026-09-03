@@ -46,7 +46,7 @@
         <div class="route-point dropoff"><span class="dot"></span><span class="route-label">${esc(order.dropoff)}</span></div>
       </div>
       <p class="package-desc">${esc(serviceLabels[type])} · ${esc(String(order.pkg || "").replace(/^\[(COLIS|FOOD|TAXI|SHOP|MARKET)\]\s*/i, ""))}</p>
-      <p class="fee-line">${Number(order.fee || 0).toFixed(2)} TND · ${esc(payment)}${date ? ` · ${esc(date)}` : ""}</p>
+      <p class="fee-line">${Number(order.fee || 0).toFixed(2)} TND${Number(order.itemsTotal) > 0 ? ` dont ${Number(order.itemsTotal).toFixed(2)} TND d'articles` : ""} · ${esc(payment)}${date ? ` · ${esc(date)}` : ""}</p>
       ${order.status === "annulee" && order.cancellationReason ? `<p class="fee-line">Motif: ${esc(order.cancellationReason)}</p>` : ""}
       <div class="order-actions">${canCancel ? `<button class="btn-ghost js-client-cancel" data-id="${esc(order.id || order._id)}">Annuler</button>` : ""}</div>
     `;

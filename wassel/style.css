@@ -571,6 +571,33 @@ input:focus {
   margin: 0;
 }
 
+.client-history { margin-top: 24px; }
+.catalog-hero { font-size: 38px; line-height: 1; }
+.catalog-menu { display: grid; gap: 10px; margin: 16px 0 0; }
+.catalog-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,.55);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.catalog-item:hover { border-color: rgba(255,138,0,.45); transform: translateY(-1px); }
+.catalog-item-copy { display: grid; gap: 2px; }
+.catalog-item-copy span { color: var(--ink-muted); font-size: 13px; }
+.catalog-cart-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.catalog-cart-row div { flex: 1; }
+.catalog-total { display: flex; justify-content: space-between; margin: 14px 0 8px; }
+.catalog-gps { margin-top: 8px; }
+.service-steps p { margin: 0 0 10px; color: var(--ink-muted); }
+
 /* ---------- Orders list ---------- */
 .orders-list {
   display: grid;

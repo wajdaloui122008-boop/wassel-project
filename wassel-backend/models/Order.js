@@ -26,6 +26,7 @@ const orderSchema = new mongoose.Schema({
   paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
   currency: { type: String, default: process.env.DEFAULT_CURRENCY || "TND", uppercase: true, minlength: 3, maxlength: 3 },
   transactionId: { type: String, trim: true, maxlength: 200, default: "" },
+  itemsTotal: { type: Number, min: 0, default: 0 },
   fee: { type: Number, required: true, min: 0 },
   commission: { type: Number, required: true, min: 0 },
   driverEarnings: { type: Number, required: true, min: 0 },
