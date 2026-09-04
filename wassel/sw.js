@@ -1,4 +1,4 @@
-const CACHE = "velto-shell-v11";
+const CACHE = "velto-shell-v12";
 const ASSETS = [
   "/",
   "/index.html",
@@ -8,6 +8,7 @@ const ASSETS = [
   "/script.js",
   "/tracking.js",
   "/dashboard2.js",
+  "/driver-actions-fix.js",
   "/driver-map.js",
   "/services.js",
   "/client-enhancements.js",
@@ -22,6 +23,10 @@ const ASSETS = [
   "/pwa.js",
   "/liquid-glass-interaction.js",
   "/social-auth.js",
+  "/runtime-guard.js",
+  "/service-ux-v1.js",
+  "/order-tracking-enhancements.js",
+  "/driver-active-ux.js",
   "/manifest.webmanifest",
   "/icon.svg"
 ];

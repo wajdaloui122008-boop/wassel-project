@@ -56,15 +56,23 @@
     try {
       if (document.visibilityState === "visible" && !document.hidden) {
         let box = document.getElementById("velto-live-toast");
-        if (!box) { box = document.createElement("div"); box.id = "velto-live-toast"; box.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:100000;max-width:360px;padding:14px 16px;border-radius:16px;background:#211d18;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.25);font:600 13px Inter,Arial"; document.body.appendChild(box); }
+        if (!box) {
+          box = document.createElement("div");
+          box.id = "velto-live-toast";
+          box.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:100000;max-width:360px;padding:14px 16px;border-radius:16px;background:#211d18;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.25);font:600 13px Inter,Arial";
+          document.body.appendChild(box);
+        }
         box.innerHTML = `<strong>${escapeHtml(title)}</strong><div style="margin-top:4px;opacity:.82;font-weight:500">${escapeHtml(body)}</div>`;
-        clearTimeout(box._timer); box._timer = setTimeout(() => box.remove(), 4500);
+        clearTimeout(box._timer);
+        box._timer = setTimeout(() => box.remove(), 4500);
       }
       if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification(title, { body, tag });
     } catch {}
   }
 
-  function escapeHtml(v) { return String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+  function escapeHtml(v) {
+    return String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
 
   async function requestNotifications() {
     if (typeof Notification === "undefined" || Notification.permission !== "default") return;
@@ -73,13 +81,18 @@
 
   function handleOrder(snapshot) {
     if (!snapshot) return;
-    const id = String(snapshot.id || snapshot._id || "");
+    const id = String(snapshot.orderId || snapshot.id || snapshot._id || "");
     const status = snapshot.status;
     if (id && status) {
       const previous = lastStatus.get(id);
       lastStatus.set(id, status);
       if (previous && previous !== status) {
-        const labels = { acceptee: "Course acceptée", route: "Course en route", livree: "Course terminée", annulee: "Course annulée" };
+        const labels = {
+          acceptee: "Course acceptée",
+          route: "Course en route",
+          livree: "Course terminée",
+          annulee: "Course annulée"
+        };
         notify(labels[status] || "Commande mise à jour", `Statut : ${status}`, `order-${id}-${status}`);
       }
     }
@@ -119,13 +132,24 @@
 
   async function boot() {
     token = localStorage.getItem("velto_token") || null;
-    if (!token) { if (socket) socket.disconnect(); watched.clear(); return; }
-    try { await loadSocketIO(); connect(); requestNotifications(); } catch {}
+    if (!token) {
+      if (socket) socket.disconnect();
+      watched.clear();
+      return;
+    }
+    try {
+      await loadSocketIO();
+      connect();
+      requestNotifications();
+    } catch {}
   }
 
   window.__veltoRealtimeWatchOrder = watchOrder;
   window.addEventListener("storage", (event) => {
-    if (event.key === "velto_token") { token = localStorage.getItem("velto_token") || null; boot(); }
+    if (event.key === "velto_token") {
+      token = localStorage.getItem("velto_token") || null;
+      boot();
+    }
   });
   window.addEventListener("velto:auth", () => boot());
   document.addEventListener("click", requestNotifications, { once: true });
@@ -133,7 +157,11 @@
   boot();
   if (!refreshTimer) refreshTimer = setInterval(() => {
     const current = localStorage.getItem("velto_token") || null;
-    if (current !== token) { token = current; boot(); }
-    else syncSubscriptions();
+    if (current !== token) {
+      token = current;
+      boot();
+    } else {
+      syncSubscriptions();
+    }
   }, 5000);
 })();

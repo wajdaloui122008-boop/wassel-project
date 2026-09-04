@@ -80,8 +80,9 @@
   async function refreshActiveOrder() {
     if (!isTaxiUser()) return;
     try {
-      const data = await api("/drivers/me/active-order");
-      activeOrder = data.order || null;
+      const orders = await api("/orders?limit=20&serviceType=taxi");
+      const list = Array.isArray(orders) ? orders : Array.isArray(orders.orders) ? orders.orders : [];
+      activeOrder = list.find(order => ["acceptee", "route"].includes(order.status)) || null;
       renderActiveOrder();
       if (activeOrder) {
         available = false;
