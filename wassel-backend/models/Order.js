@@ -7,6 +7,7 @@ const VALID_OFFER_STATUSES = ["offered", "declined", "expired", "accepted", "can
 const locationSchema = new mongoose.Schema({ lat: { type: Number, required: true, min: -90, max: 90 }, lng: { type: Number, required: true, min: -180, max: 180 } }, { _id: false });
 const statusEventSchema = new mongoose.Schema({ status: { type: String, enum: VALID_STATUSES, required: true }, at: { type: Date, default: Date.now } }, { _id: false });
 const dispatchOfferSchema = new mongoose.Schema({ driver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, status: { type: String, enum: VALID_OFFER_STATUSES, default: "offered" }, distanceToPickupKm: { type: Number, min: 0, default: null }, offeredAt: { type: Date, default: Date.now }, expiresAt: { type: Date, required: true }, respondedAt: { type: Date, default: null } }, { _id: false });
+const orderItemSchema = new mongoose.Schema({ itemId: { type: mongoose.Schema.Types.ObjectId, ref: "MenuItem" }, name: { type: String, required: true, maxlength: 120 }, quantity: { type: Number, required: true, min: 1, max: 100 }, unitPrice: { type: Number, required: true, min: 0 }, modifiers: [{ name: String, priceDelta: Number }] }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
   serviceType: { type: String, enum: VALID_SERVICE_TYPES, default: "colis", index: true },
@@ -20,6 +21,12 @@ const orderSchema = new mongoose.Schema({
   status: { type: String, enum: VALID_STATUSES, default: "nouvelle" },
   statusHistory: { type: [statusEventSchema], default: [] },
   client: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
+  vendorRejectReason: { type: String, trim: true, maxlength: 40, default: "" },
+  vendorStatus: { type: String, enum: ["pending", "accepted", "rejected"], default: "accepted", index: true },
+  readyAt: { type: Date, default: null },
+  pickupStatus: { type: String, enum: ["pending", "ready"], default: "pending", index: true },
+  items: { type: [orderItemSchema], default: [] },
   livreur: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   dispatchOffers: { type: [dispatchOfferSchema], default: [] },
   paymentMethod: { type: String, enum: ["especes", "carte", "wallet"], default: "especes" },
@@ -27,6 +34,8 @@ const orderSchema = new mongoose.Schema({
   currency: { type: String, default: process.env.DEFAULT_CURRENCY || "TND", uppercase: true, minlength: 3, maxlength: 3 },
   transactionId: { type: String, trim: true, maxlength: 200, default: "" },
   itemsTotal: { type: Number, min: 0, default: 0 },
+  promoCode: { type: String, trim: true, uppercase: true, maxlength: 40, default: "" },
+  promoDiscount: { type: Number, min: 0, default: 0 },
   fee: { type: Number, required: true, min: 0 },
   commission: { type: Number, required: true, min: 0 },
   driverEarnings: { type: Number, required: true, min: 0 },
@@ -37,6 +46,7 @@ const orderSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 orderSchema.index({ client: 1, createdAt: -1 });
+orderSchema.index({ vendor: 1, status: 1, createdAt: -1 });
 orderSchema.index({ livreur: 1, status: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ "dispatchOffers.driver": 1, "dispatchOffers.status": 1, "dispatchOffers.expiresAt": 1 });

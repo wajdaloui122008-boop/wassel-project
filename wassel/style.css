@@ -185,6 +185,34 @@ main {
   animation: fadeSlide 0.4s var(--ease) both;
 }
 
+.client-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  min-height: 188px;
+  padding: 30px 34px;
+  border-radius: 30px;
+  color: #fff;
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(120deg, #161d38 0%, #263d72 58%, #427dc2 100%);
+  box-shadow: 0 24px 55px rgba(31, 53, 99, .24);
+}
+.client-hero::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 80% 25%, rgba(255,255,255,.2), transparent 23%), linear-gradient(110deg, transparent 40%, rgba(255,255,255,.08)); pointer-events: none; }
+.client-hero h1 { color: #fff; font-size: clamp(25px, 4vw, 38px); line-height: 1.08; letter-spacing: -.04em; margin: 8px 0 10px; position: relative; z-index: 1; }
+.client-hero h1 em { color: #a9d7ff; font-style: normal; }
+.client-hero p { color: rgba(255,255,255,.72); margin: 0; max-width: 470px; position: relative; z-index: 1; }
+.eyebrow, .panel-kicker { font-size: 10px; font-weight: 800; letter-spacing: .14em; color: var(--ink-muted); }
+.client-hero .eyebrow { color: #a9d7ff; position: relative; z-index: 1; }
+.hero-orbit { width: 155px; height: 155px; border-radius: 50%; border: 1px solid rgba(255,255,255,.28); display: grid; place-items: center; position: relative; z-index: 1; flex: 0 0 auto; background: rgba(255,255,255,.08); }
+.hero-orbit::before { content: ""; width: 108px; height: 108px; border: 1px dashed rgba(255,255,255,.28); border-radius: 50%; }
+.hero-orbit span { position: absolute; font-size: 44px; filter: drop-shadow(0 9px 12px rgba(0,0,0,.2)); }
+.hero-orbit b { position: absolute; top: 15px; right: 19px; color: #8de6bd; font-size: 16px; }
+.trust-strip { display: flex; gap: 10px; flex-wrap: wrap; margin-top: -8px; }
+.trust-strip span { padding: 9px 13px; border-radius: 999px; background: rgba(255,255,255,.45); border: 1px solid rgba(255,255,255,.6); color: var(--ink-muted); font-size: 12px; font-weight: 600; }
+.trust-strip b { color: #2879c7; margin-right: 4px; }
+
 @keyframes fadeSlide {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
@@ -505,8 +533,13 @@ input:focus {
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 4px 2px 8px;
+  margin-bottom: 34px;
+  position: relative;
+  z-index: 2;
+  scrollbar-width: none;
 }
+.category-bar::-webkit-scrollbar { display: none; }
 
 .category-tab {
   flex-shrink: 0;
@@ -517,7 +550,8 @@ input:focus {
   background: var(--glass-fill-strong);
   border: 1px solid var(--glass-border);
   color: var(--ink-muted);
-  padding: 12px 20px;
+  min-width: 112px;
+  padding: 13px 18px 11px;
   border-radius: var(--radius-md);
   font-family: var(--font-body);
   font-weight: 600;
@@ -526,6 +560,16 @@ input:focus {
   backdrop-filter: blur(12px);
   transition: transform 0.18s var(--ease), background 0.18s, color 0.18s, box-shadow 0.18s;
 }
+.category-tab .category-icon { font-size: 22px; line-height: 1; }
+.category-tab small { color: inherit; opacity: .62; font-size: 10px; font-weight: 500; }
+.category-tab.active small { opacity: .78; }
+.category-panel { position: relative; z-index: 1; clear: both; }
+.category-panel > .two-col { padding-top: 2px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.panel-kicker { margin-bottom: 7px; }
+.live-dot { color: #168653; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.live-dot::first-letter { color: #2fbf78; }
+.btn-primary span { margin-left: 8px; font-size: 18px; vertical-align: -1px; }
 
 .category-tab:hover { transform: translateY(-2px); }
 
@@ -543,6 +587,18 @@ input:focus {
 
 @media (min-width: 720px) {
   .two-col { grid-template-columns: 1fr 1fr; align-items: start; }
+}
+
+@media (max-width: 719px) {
+  .client-hero { min-height: 215px; padding: 24px 22px; }
+  .hero-orbit { width: 92px; height: 92px; margin-right: -18px; }
+  .hero-orbit::before { width: 65px; height: 65px; }
+  .hero-orbit span { font-size: 28px; }
+  .hero-orbit b { top: 7px; right: 10px; }
+  .client-hero h1 { font-size: 27px; }
+  .trust-strip { gap: 6px; }
+  .trust-strip span { font-size: 11px; padding: 8px 10px; }
+  .category-tab { min-width: 96px; padding-inline: 11px; }
 }
 
 /* ---------- Coming soon ---------- */

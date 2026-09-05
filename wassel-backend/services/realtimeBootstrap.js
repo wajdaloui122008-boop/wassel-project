@@ -3,6 +3,8 @@ const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
+const User = require("../models/User");
+const { notifyUser } = require("./notificationService");
 const { JWT_SECRET } = require("../middleware/auth");
 
 if (!http.Server.prototype.__veltoRealtimePatched) {
@@ -43,6 +45,13 @@ function attachRealtime(server) {
   io.on("connection", (socket) => {
     const userId = String(socket.user?.id || "");
     if (userId) socket.join(`user:${userId}`);
+    if (socket.user?.role === "livreur" || socket.user?.role === "taxi") {
+      const pendingDisconnect = driverDisconnectTimers.get(userId);
+      if (pendingDisconnect) {
+        clearTimeout(pendingDisconnect);
+        driverDisconnectTimers.delete(userId);
+      }
+    }
 
     socket.on("order:watch", async (orderId) => {
       if (typeof orderId !== "string" || !mongoose.isValidObjectId(orderId)) return;
@@ -62,10 +71,45 @@ function attachRealtime(server) {
     socket.on("order:unwatch", (orderId) => {
       if (typeof orderId === "string") socket.leave(`order:${orderId}`);
     });
+
+    socket.on("driver:location", async (payload = {}) => {
+      if (socket.user?.role !== "livreur" && socket.user?.role !== "taxi") return;
+      if (mongoose.connection.readyState !== 1 || typeof payload.orderId !== "string" || !mongoose.isValidObjectId(payload.orderId)) return;
+      const lat = Number(payload.lat), lng = Number(payload.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+      try {
+        const order = await Order.findOne({ _id: payload.orderId, livreur: userId, status: { $in: ["acceptee", "route"] } }).select("_id client status");
+        if (!order || mongoose.connection.readyState !== 1) return;
+        const location = { lat, lng, updatedAt: new Date(), ...(Number.isFinite(Number(payload.heading)) ? { heading: Number(payload.heading) } : {}), ...(Number.isFinite(Number(payload.speed)) ? { speed: Math.max(0, Number(payload.speed)) } : {}) };
+        await User.updateOne({ _id: userId }, { $set: { location, locationPoint: { type: "Point", coordinates: [lng, lat] } } });
+        io.to(`order:${String(order._id)}`).emit("driver:location", { orderId: String(order._id), location });
+      } catch (err) {
+        if (!shuttingDown && mongoose.connection.readyState === 1) console.error("Realtime location error:", err.message);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      if (socket.user?.role !== "livreur" && socket.user?.role !== "taxi") return;
+      const driverId = userId;
+      const timer = setTimeout(async () => {
+        driverDisconnectTimers.delete(driverId);
+        if (shuttingDown || mongoose.connection.readyState !== 1 || io.sockets.adapter.rooms.has(`user:${driverId}`)) return;
+        try {
+          await User.updateOne({ _id: driverId }, { $set: { isOnline: false, isAvailable: false } });
+        } catch (err) {
+          if (!shuttingDown && mongoose.connection.readyState === 1) console.error("Driver reconnect grace error:", err.message);
+        }
+      }, DRIVER_RECONNECT_GRACE_MS);
+      timer.unref();
+      driverDisconnectTimers.set(driverId, timer);
+    });
   });
 
   const lastSnapshots = new Map();
   const sentOffers = new Map();
+  const sentVendorOrders = new Map();
+  const driverDisconnectTimers = new Map();
+  const DRIVER_RECONNECT_GRACE_MS = 75 * 1000;
   let shuttingDown = false;
 
   const tick = async () => {
@@ -93,6 +137,7 @@ function attachRealtime(server) {
           lastSnapshots.set(key, serialized);
           io.to(`order:${key}`).emit("order:update", snapshot);
         }
+
       }
 
       const offerOrders = await Order.find({
@@ -110,7 +155,7 @@ function attachRealtime(server) {
           const offerKey = `${String(order._id)}:${String(offer.driver)}:${new Date(offer.offeredAt).getTime()}`;
           if (sentOffers.has(offerKey)) continue;
           sentOffers.set(offerKey, now);
-          io.to(`user:${String(offer.driver)}`).emit("driver:offer", {
+          const offerPayload = {
             order: {
               id: String(order._id),
               serviceType: order.serviceType,
@@ -125,6 +170,15 @@ function attachRealtime(server) {
               offeredAt: offer.offeredAt,
               expiresAt: offer.expiresAt,
             }
+          };
+          io.to(`user:${String(offer.driver)}`).emit("driver:offer", offerPayload);
+          await notifyUser({
+            recipient: offer.driver,
+            type: "dispatch-offer",
+            orderId: order._id,
+            title: "Nouvelle course",
+            body: `${order.pickup || "Départ"} → ${order.dropoff || "Destination"}`,
+            idempotencyKey: `dispatch-offer:${order._id}:${offer.driver}:${new Date(offer.offeredAt).getTime()}`,
           });
         }
       }
@@ -138,14 +192,61 @@ function attachRealtime(server) {
     }
   };
 
-  const timer = setInterval(tick, 1500);
-  timer.unref();
+  const vendorTick = async () => {
+    if (shuttingDown || mongoose.connection.readyState !== 1) return;
+    try {
+      const now = Date.now();
+      const pendingVendorOrders = await Order.find({ status: "nouvelle", vendorStatus: "pending", vendor: { $ne: null } })
+        .select("client vendor serviceType pickup dropoff pkg items fee currency createdAt")
+        .lean();
+
+      if (shuttingDown || mongoose.connection.readyState !== 1) return;
+
+      for (const order of pendingVendorOrders) {
+        const key = String(order._id);
+        if (sentVendorOrders.has(key)) continue;
+        sentVendorOrders.set(key, now);
+        io.to(`user:${String(order.vendor)}`).emit("vendor:order", { ...order, id: key });
+      }
+      for (const [key, at] of sentVendorOrders) if (now - at > 60000) sentVendorOrders.delete(key);
+    } catch (err) {
+      if (!shuttingDown && mongoose.connection.readyState !== 0) console.error("Realtime vendor tick error:", err.message);
+    }
+  };
+
+  let timer = null;
+  let vendorTimer = null;
+  const startTimer = () => {
+    if (timer || shuttingDown) return;
+    timer = setInterval(tick, 1500);
+    timer.unref();
+    vendorTimer = setInterval(vendorTick, 1500);
+    vendorTimer.unref();
+  };
+  const stopTimer = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    if (vendorTimer) {
+      clearInterval(vendorTimer);
+      vendorTimer = null;
+    }
+  };
+  startTimer();
+  mongoose.connection.on("disconnected", stopTimer);
+  mongoose.connection.on("connected", startTimer);
   server.once("close", () => {
     shuttingDown = true;
-    clearInterval(timer);
+    stopTimer();
+    mongoose.connection.off("disconnected", stopTimer);
+    mongoose.connection.off("connected", startTimer);
     io.close();
     lastSnapshots.clear();
     sentOffers.clear();
+    sentVendorOrders.clear();
+    for (const timer of driverDisconnectTimers.values()) clearTimeout(timer);
+    driverDisconnectTimers.clear();
   });
   console.log("Velto realtime gateway actif");
 }

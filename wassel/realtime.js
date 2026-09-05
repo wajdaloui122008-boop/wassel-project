@@ -1,5 +1,5 @@
 (() => {
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
   let socket = null;
   let token = localStorage.getItem("velto_token") || null;
   let watched = new Set();
@@ -114,6 +114,9 @@
     socket.on("order:snapshot", handleOrder);
     socket.on("order:update", handleOrder);
     socket.on("driver:offer", handleOffer);
+    socket.on("vendor:order", (order) => window.dispatchEvent(new CustomEvent("velto:realtime-vendor-order", { detail: order })));
+    socket.on("vendor:order-update", (event) => window.dispatchEvent(new CustomEvent("velto:realtime-vendor-update", { detail: event })));
+     socket.on("driver:location", (event) => window.dispatchEvent(new CustomEvent("velto:driver-location", { detail: event })));
     socket.on("connect_error", () => {});
   }
 
@@ -124,6 +127,11 @@
   }
 
   window.__veltoRealtimeWatchOrder = watchOrder;
+  window.__veltoRealtimeEmit = (event, payload) => {
+    if (!socket?.connected) return false;
+    socket.emit(event, payload);
+    return true;
+  };
   window.addEventListener("storage", (event) => {
     if (event.key === "velto_token") { token = localStorage.getItem("velto_token") || null; boot(); }
   });

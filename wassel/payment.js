@@ -1,5 +1,5 @@
 (() => {
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
   const token = () => localStorage.getItem("velto_token") || "";
   const auth = () => token() ? { Authorization: `Bearer ${token()}` } : {};
   const json = async r => { try { return await r.json(); } catch { return {}; } };
@@ -25,7 +25,7 @@
   function open() { ensureUi(); document.getElementById("velto-payment-modal").style.display="flex"; }
   function setMessage(text) { const el=document.getElementById("velto-payment-message"); if(el) el.textContent=text; }
   function setError(text) { const el=document.getElementById("velto-payment-error"); if(el) el.textContent=text || ""; }
-  function amountText(order) { return `${Number(order.fee || 0).toFixed(3)} ${String(order.currency || "TND").toUpperCase()}`; }
+  function amountText(order) { return window.VELTO_MONEY ? window.VELTO_MONEY(order.fee, order.currency || "USD") : `${Number(order.fee || 0).toFixed(2)} ${String(order.currency || "USD").toUpperCase()}`; }
 
   async function loadStripe() {
     if (stripe) return stripe;
@@ -53,7 +53,7 @@
       const d=await json(r);
       if(!r.ok) throw Error(d.error || "Impossible de créer le paiement");
       activePayment.payment=d.payment; activePayment.clientSecret=d.clientSecret || d.payment?.metadata?.clientSecret || null;
-      if (d.payment?.status === "paid" || d.order?.paymentStatus === "paid") { sessionStorage.setItem(key,"done"); setMessage("Paiement confirmé."); setTimeout(close,1200); return; }
+      if (["captured","authorized"].includes(d.payment?.status) || d.order?.paymentStatus === "paid") { sessionStorage.setItem(key,"done"); setMessage("Paiement confirmé."); setTimeout(close,1200); return; }
       if (config.provider === "stripe" && activePayment.clientSecret) {
         const s=await loadStripe();
         if(!s) throw Error("Stripe.js n'a pas pu être chargé.");
@@ -78,7 +78,7 @@
       for(let i=0;i<8;i++){
         await new Promise(r=>setTimeout(r,1000));
         const r=await fetch(`${API}/payments/${activePayment._orderId}`,{headers:auth()}); const d=await json(r);
-        if(r.ok && d.payment?.status === "paid") { sessionStorage.setItem(`velto_payment_${activePayment._orderId}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
+        if(r.ok && ["captured","authorized"].includes(d.payment?.status)) { sessionStorage.setItem(`velto_payment_${activePayment._orderId}`,"done"); setMessage("Paiement confirmé ✓"); window.__veltoRefreshOrders?.(); setTimeout(close,1200); return; }
         if(r.ok && d.payment?.status === "failed") throw Error("Le paiement a échoué.");
       }
       setMessage("Paiement envoyé. La confirmation finale arrivera après le webhook du fournisseur.");

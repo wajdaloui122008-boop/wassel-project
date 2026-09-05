@@ -1,5 +1,5 @@
 (() => {
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
   const token = () => localStorage.getItem("velto_token") || "";
   const esc = v => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const service = () => document.getElementById("category-taxi");
@@ -26,7 +26,7 @@
       const km = haversine(a, b);
       const fare = Math.max(5, 3 + km * 0.8);
       estimate = { km, fare };
-      box.innerHTML = `<b>Estimation</b><span>${km.toFixed(1)} km</span><strong>${fare.toFixed(1)} TND</strong><small>Tarif final calculé par Velto à la création.</small>`;
+      box.innerHTML = `<b>Estimation</b><span>${km.toFixed(1)} km</span><strong>${window.VELTO_MONEY ? window.VELTO_MONEY(fare, "USD") : `${fare.toFixed(1)} USD`}</strong><small>Tarif final calculé par Velto à la création.</small>`;
     } catch { box.textContent = "Impossible de calculer l'estimation"; }
   }
 

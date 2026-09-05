@@ -34,7 +34,7 @@ class MockProvider extends PaymentProvider {
   normalizeWebhookEvent(event) {
     if (!event?.type) return null;
     const object = event.data?.object || {};
-    if (event.type === "payment_succeeded") return { type: "paid", providerPaymentId: object.id };
+    if (event.type === "payment_succeeded") return { type: "captured", providerPaymentId: object.id };
     if (event.type === "payment_failed") return { type: "failed", providerPaymentId: object.id };
     if (event.type === "payment_refunded") return { type: "refunded", providerPaymentId: object.id };
     return { type: "ignored", providerPaymentId: object.id || null };

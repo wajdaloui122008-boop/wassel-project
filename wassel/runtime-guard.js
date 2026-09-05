@@ -1,5 +1,5 @@
 (() => {
-  const API_URL = "https://wassel-backend-ds3n.onrender.com";
+  const API_URL = window.VELTO_API_URL;
   let banner;
 
   function ensureBanner() {

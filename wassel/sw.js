@@ -1,10 +1,11 @@
-const CACHE = "velto-shell-v11";
+const CACHE = "velto-shell-v14";
 const ASSETS = [
   "/",
   "/index.html",
   "/style.css",
   "/liquid-glass.css",
   "/liquid-glass-v2.css",
+  "/config.js",
   "/script.js",
   "/tracking.js",
   "/dashboard2.js",

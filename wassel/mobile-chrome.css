@@ -1,0 +1,95 @@
+/*
+ * The web implementation is glass-inspired, not Apple's native Liquid Glass:
+ * CSS cannot reproduce OS-level lensing/refraction. Glass is limited to
+ * floating navigation chrome; content surfaces remain solid for readability.
+ */
+.mobile-nav { display: none; }
+body:has(#view-auth.active) .mobile-nav { display: none !important; }
+
+/* Keep content opaque underneath the floating chrome. */
+.glass-panel,
+.order-card,
+.role-card {
+  background: #fff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.client-hero {
+  background: linear-gradient(120deg, #161d38 0%, #263d72 58%, #427dc2 100%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+@media (max-width: 760px) {
+  body { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .topbar {
+    top: max(8px, env(safe-area-inset-top));
+    margin-top: env(safe-area-inset-top);
+    min-height: 64px;
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  body.nav-collapsed .topbar { transform: translateY(-8px) scale(.98); opacity: .92; }
+  body.nav-collapsed .category-bar { top: calc(58px + env(safe-area-inset-top)); }
+  main { padding-top: 18px; }
+  .mobile-nav {
+    position: fixed;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    left: 12px;
+    right: 12px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    min-height: 64px;
+    padding: 7px 10px;
+    z-index: 120;
+    border: 1px solid rgba(255,255,255,.48);
+    border-radius: 24px;
+    background: rgba(255,255,255,.2);
+    backdrop-filter: blur(24px) saturate(170%);
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+    box-shadow: 0 16px 42px rgba(16,24,40,.22), inset 0 1px 0 rgba(255,255,255,.72);
+  }
+  .mobile-nav-item {
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 17px;
+    display: grid;
+    place-items: center;
+    gap: 1px;
+    background: transparent;
+    color: #647084;
+    font: 700 12px var(--font-body);
+  }
+  .mobile-nav-item span { font-size: 23px; line-height: 20px; }
+  .mobile-nav-item small { font-size: 10px; }
+  .mobile-nav-item.active {
+    color: #1769b0;
+    background: rgba(255,255,255,.46);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.78);
+  }
+  .category-bar {
+    position: sticky;
+    top: calc(72px + env(safe-area-inset-top));
+    padding-top: 8px;
+    margin-inline: -4px;
+    background: linear-gradient(180deg, rgba(225,239,252,.92) 68%, transparent);
+  }
+  .category-tab { min-height: 76px; }
+  .client-history { scroll-margin-top: 118px; }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .mobile-nav,
+  .category-bar,
+  .topbar {
+    background: #f7f9fc !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-color: #8090a5 !important;
+  }
+  .mobile-nav-item.active { background: #dbeeff !important; color: #0b4f8a; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .glass-panel, .order-card, .role-card { background: #f7f9fc !important; }
+}
