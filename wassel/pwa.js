@@ -2,20 +2,21 @@
   if (!("serviceWorker" in navigator)) return;
 
   let deferredPrompt = null;
-  let refreshing = false;
   let registration = null;
 
   window.addEventListener("load", async () => {
     try {
+      if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(current => current.unregister()));
+        return;
+      }
       registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
       // Registration is enough for startup; do not block the page on a network update.
       // The browser performs normal update checks according to the service-worker lifecycle.
 
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        if (refreshing) return;
-        refreshing = true;
-        window.location.reload();
-      });
+      // A new worker can take control without interrupting the current page.
+      // Reloading here causes visible navigation flicker during worker updates.
     } catch (err) {
       console.warn("PWA service worker:", err);
     }

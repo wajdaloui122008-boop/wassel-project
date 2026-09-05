@@ -41,4 +41,9 @@ function requireRole(role) {
   };
 }
 
-module.exports = { requireAuth, requireRole, JWT_SECRET: effectiveSecret };
+function requireVendor(req, res, next) {
+  if (req.user.role !== "vendor" && req.user.role !== "admin") return res.status(403).json({ error: "Accès réservé aux vendeurs" });
+  next();
+}
+
+module.exports = { requireAuth, requireRole, requireVendor, JWT_SECRET: effectiveSecret };

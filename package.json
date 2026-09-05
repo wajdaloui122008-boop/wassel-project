@@ -1,0 +1,7 @@
+{
+    "private": true,
+    "scripts": {
+        "start": "npm --prefix wassel-backend start",
+        "start:frontend": "npx serve wassel"
+    }
+}

@@ -4,10 +4,10 @@ const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const User = require("../models/User");
 
-const BATCH_SIZE = 8;
+const BATCH_SIZE = 1;
 const MAX_TOTAL_OFFERS = 32;
-const RADIUS_KM = 20;
-const OFFER_TTL_MS = 30 * 1000;
+const RADIUS_KM = Math.max(0.5, Number(process.env.DISPATCH_RADIUS_KM || 3));
+const OFFER_TTL_MS = 90 * 1000;
 const GPS_MAX_AGE_MS = 2 * 60 * 1000;
 const TICK_MS = 5000;
 
@@ -51,6 +51,7 @@ async function cleanupDriverOffers() {
 async function redispatchOrder(order) {
   const now = new Date();
   if (order.livreur || order.status !== "nouvelle") return false;
+  if (order.paymentMethod !== "especes" && order.paymentStatus !== "paid") return false;
   if (order.dispatchOffers?.some((offer) => offer.status === "offered" && new Date(offer.expiresAt) > now)) return false;
 
   const previousDriverIds = new Set((order.dispatchOffers || []).map((offer) => String(offer.driver)));
@@ -66,6 +67,7 @@ async function redispatchOrder(order) {
     "location.lat": { $exists: true },
     "location.lng": { $exists: true },
     "location.updatedAt": { $gte: staleCutoff },
+    locationPoint: { $near: { $geometry: { type: "Point", coordinates: [Number(order.pickupLocation.lng), Number(order.pickupLocation.lat)] }, $maxDistance: RADIUS_KM * 1000 } },
   };
   if (roleFilter === "livreur") {
     driverQuery.$or = [
@@ -75,19 +77,30 @@ async function redispatchOrder(order) {
     ];
   }
 
-  const drivers = await User.find(driverQuery).select("location capabilities role").limit(100);
+  const drivers = await User.find({ ...driverQuery, $expr: { $lt: [{ $ifNull: ["$currentOrderCount", 0] }, { $ifNull: ["$maxConcurrentOrders", 1] }] } }).select("location capabilities role ratingAverage lastAssignedAt currentOrderCount maxConcurrentOrders").limit(100);
   const ranked = drivers.filter((driver) => driverMatchesService(driver, order.serviceType) && !previousDriverIds.has(String(driver._id)))
-    .map((driver) => ({ driver, distanceKm: haversineKm(driver.location, order.pickupLocation) }))
-    .filter((item) => item.distanceKm <= RADIUS_KM).sort((a, b) => a.distanceKm - b.distanceKm)
+    .map((driver) => {
+      const distanceKm = haversineKm(driver.location, order.pickupLocation);
+      const idleMinutes = driver.lastAssignedAt ? Math.max(0, (Date.now() - new Date(driver.lastAssignedAt).getTime()) / 60000) : 60;
+      const score = (distanceKm / RADIUS_KM) * 0.55 + ((5 - Number(driver.ratingAverage || 5)) / 5) * 0.25 + (1 / (1 + idleMinutes)) * 0.2;
+      return { driver, distanceKm, score };
+    })
+    .filter((item) => item.distanceKm <= RADIUS_KM).sort((a, b) => a.score - b.score)
     .slice(0, Math.min(BATCH_SIZE, MAX_TOTAL_OFFERS - totalOffers));
+  if (!ranked.length) {
+    const fallbackQuery = { role: roleFilter, isOnline: true, isAvailable: true, $expr: { $lt: [{ $ifNull: ["$currentOrderCount", 0] }, { $ifNull: ["$maxConcurrentOrders", 1] }] } };
+    if (roleFilter === "livreur") fallbackQuery.$or = [{ capabilities: order.serviceType }, { capabilities: { $exists: false } }, { capabilities: { $size: 0 } }];
+    const fallbackDrivers = await User.find(fallbackQuery).select("location capabilities role").limit(100);
+    ranked.push(...fallbackDrivers.filter((driver) => driverMatchesService(driver, order.serviceType) && !previousDriverIds.has(String(driver._id))).map((driver) => ({ driver, distanceKm: null })).slice(0, Math.min(BATCH_SIZE, MAX_TOTAL_OFFERS - totalOffers)));
+  }
 
   if (!ranked.length) return false;
   const expiresAt = new Date(Date.now() + OFFER_TTL_MS);
-  const offers = ranked.map((item) => ({ driver: item.driver._id, distanceToPickupKm: Math.round(item.distanceKm * 100) / 100, offeredAt: now, expiresAt, status: "offered" }));
+  const offers = ranked.map((item) => ({ driver: item.driver._id, distanceToPickupKm: item.distanceKm == null ? null : Math.round(item.distanceKm * 100) / 100, offeredAt: now, expiresAt, status: "offered" }));
 
   const updated = await Order.findOneAndUpdate(
     { _id: order._id, status: "nouvelle", livreur: null, dispatchOffers: { $not: { $elemMatch: { status: "offered", expiresAt: { $gt: now } } } } },
-    { $push: { dispatchOffers: { $each: offers } } }, { new: true }
+    { $push: { dispatchOffers: { $each: offers } } }, { returnDocument: "after" }
   );
   return Boolean(updated);
 }
@@ -100,7 +113,12 @@ async function processRedispatch() {
   tickInFlight = true;
   try {
     await cleanupDriverOffers();
-    const orders = await Order.find({ status: "nouvelle", livreur: null }).sort({ createdAt: 1 }).limit(100);
+    const orders = await Order.find({
+      status: "nouvelle",
+      livreur: null,
+        $and: [{ $or: [{ vendor: null }, { vendor: { $exists: false } }, { vendorStatus: "accepted" }] }],
+      $or: [{ paymentMethod: "especes" }, { paymentMethod: { $in: ["carte", "wallet"] }, paymentStatus: "paid" }],
+    }).sort({ createdAt: 1 }).limit(100);
     for (const order of orders) {
       if (stopping || mongoose.connection.readyState !== 1) break;
       try {
@@ -116,15 +134,27 @@ async function processRedispatch() {
   }
 }
 
-const timer = setInterval(() => {
-  if (!stopping) processRedispatch();
-}, TICK_MS);
-timer.unref();
+let timer = null;
+function startTimer() {
+  if (timer || stopping) return;
+  timer = setInterval(() => {
+    if (!stopping) processRedispatch();
+  }, TICK_MS);
+  timer.unref();
+}
+function stopTimer() {
+  if (!timer) return;
+  clearInterval(timer);
+  timer = null;
+}
+startTimer();
+mongoose.connection.on("disconnected", stopTimer);
+mongoose.connection.on("connected", startTimer);
 
 async function stopDispatchWorker() {
   if (stopping) return;
   stopping = true;
-  clearInterval(timer);
+  stopTimer();
 }
 
 process.once("SIGTERM", stopDispatchWorker);

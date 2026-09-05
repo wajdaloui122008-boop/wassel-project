@@ -1,6 +1,7 @@
 const express = require("express");
 const Payment = require("../../models/Payment");
 const Order = require("../../models/Order");
+const { notifyOrderStatus } = require("../notificationService");
 const { getPaymentProvider } = require("./index");
 
 const router = express.Router();
@@ -23,19 +24,19 @@ router.post("/:provider", express.raw({ type: "application/json", limit: "256kb"
     const eventId = event.id ? String(event.id) : null;
     if (eventId && payment.metadata?.lastWebhookEventId === eventId) return res.json({ received: true, duplicate: true });
 
-    if (normalized.type === "paid") {
-      payment.status = "paid";
-      payment.paidAt = payment.paidAt || new Date();
-      payment.transactionId = payment.providerPaymentId || payment.transactionId || "";
-      await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "paid", transactionId: payment.providerPaymentId || "" } });
+    if (normalized.type === "captured") {
+      payment.status = "captured";
+      const order = await Order.findByIdAndUpdate(payment.orderId, { $set: { paymentStatus: "paid", transactionId: payment.providerPaymentId || "" } }, { returnDocument: "after" });
+      if (order) await notifyOrderStatus(order, "acceptee");
     } else if (normalized.type === "failed") {
       payment.status = "failed";
-      await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "failed", transactionId: payment.providerPaymentId || "" } });
+      payment.failureReason = String(event.data?.object?.last_payment_error?.message || "").slice(0, 300);
+      const order = await Order.findByIdAndUpdate(payment.orderId, { $set: { paymentStatus: "failed", transactionId: payment.providerPaymentId || "" } }, { returnDocument: "after" });
+      if (order) await notifyOrderStatus(order, "annulee");
     } else if (normalized.type === "refunded") {
       payment.status = "refunded";
       payment.providerRefundId = normalized.providerRefundId || payment.providerRefundId;
-      payment.refundedAt = payment.refundedAt || new Date();
-      await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "refunded", transactionId: payment.providerPaymentId || "" } });
+      await Order.findByIdAndUpdate(payment.orderId, { $set: { paymentStatus: "refunded", transactionId: payment.providerPaymentId || "" } });
     }
 
     payment.metadata = { ...(payment.metadata || {}), ...(eventId ? { lastWebhookEventId: eventId } : {}) };

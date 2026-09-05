@@ -1,5 +1,5 @@
 (() => {
-  const API_URL = "https://wassel-backend-ds3n.onrender.com";
+  const API_URL = window.VELTO_API_URL;
   const TOKEN_KEY = "velto_token";
 
   function currentRole() {

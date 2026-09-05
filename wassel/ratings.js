@@ -1,5 +1,5 @@
 (() => {
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
   const token = () => localStorage.getItem("velto_token") || "";
   const H = () => token() ? { Authorization: `Bearer ${token()}` } : {};
   let cache = [];
@@ -47,15 +47,18 @@
         button.textContent = "✓ Déjà noté";
         return;
       }
-      const raw = window.prompt("Notez cette course de 1 à 5 ⭐", "5");
+      const raw = window.prompt("Notez votre livreur de 1 à 5 ⭐", "5");
       if (raw === null) return;
       const score = Number.parseInt(raw, 10);
       if (!Number.isInteger(score) || score < 1 || score > 5) throw new Error("Choisissez une note entre 1 et 5.");
+      const vendorRaw = order.vendor ? window.prompt("Notez aussi le vendeur de 1 à 5 ⭐ (optionnel)", "5") : null;
+      const vendorRating = vendorRaw === null || vendorRaw === "" ? null : Number.parseInt(vendorRaw, 10);
+      if (vendorRating !== null && (!Number.isInteger(vendorRating) || vendorRating < 1 || vendorRating > 5)) throw new Error("La note vendeur doit être comprise entre 1 et 5.");
       const comment = window.prompt("Commentaire (optionnel) :", "") ?? "";
       const r = await fetch(`${API}/ratings`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...H() },
-        body: JSON.stringify({ orderId, rating: score, comment })
+        body: JSON.stringify({ orderId, rating: score, driverRating: score, vendorRating, comment })
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "Impossible d'enregistrer la note");

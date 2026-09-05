@@ -1,5 +1,5 @@
 (() => {
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
   const token = () => localStorage.getItem("velto_token") || "";
   const headers = () => ({ Authorization: `Bearer ${token()}` });
   let online = false;

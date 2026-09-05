@@ -1,5 +1,5 @@
 (() => {
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
   const STATUS = { nouvelle: "Nouvelle", acceptee: "Acceptée", route: "En route", livree: "Livrée", annulee: "Annulée" };
   const FLOW = ["nouvelle", "acceptee", "route", "livree"];
   let user = null, token = localStorage.getItem("velto_token") || null, map = null, marker = null;
@@ -12,7 +12,7 @@
     const item = document.createElement("div"); item.textContent = message; item.style.cssText = `padding:13px 16px;border-radius:14px;background:rgba(28,24,20,.95);color:white;box-shadow:0 10px 30px rgba(0,0,0,.18);font:500 13px Inter,Arial,sans-serif;border:1px solid ${success ? "rgba(214,178,94,.6)" : "rgba(255,255,255,.12)"}`; host.appendChild(item); setTimeout(() => item.remove(), 4200);
   };
   const notify = (title, body) => { if ("Notification" in window && Notification.permission === "granted") { try { new Notification(title, { body }); } catch {} } };
-  const formatTime = value => { const d = new Date(value); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("fr-TN", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }); };
+  const formatTime = value => { const d = new Date(value); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(window.VELTO_LOCALE || navigator.language, { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }); };
   async function loadLeaflet() {
     if (window.L) return;
     await new Promise((resolve, reject) => {

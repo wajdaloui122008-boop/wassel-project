@@ -57,7 +57,7 @@ class StripeProvider extends PaymentProvider {
     const object = event?.data?.object || {};
     switch (event?.type) {
       case "payment_intent.succeeded":
-        return { type: "paid", providerPaymentId: object.id };
+        return { type: "captured", providerPaymentId: object.id };
       case "payment_intent.payment_failed":
         return { type: "failed", providerPaymentId: object.id };
       case "charge.refunded":

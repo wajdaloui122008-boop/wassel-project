@@ -193,6 +193,12 @@ input:focus, select:focus, textarea:focus {
     inset 0 1px 0 rgba(255,255,255,.55),
     inset 0 -1px 0 rgba(0,50,130,.12);
 }
+.btn-primary:disabled { background: linear-gradient(135deg, #8ba8c7, #7892b0) !important; box-shadow: none; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid rgba(10,132,255,.35);
+  outline-offset: 3px;
+}
+button:disabled { cursor: not-allowed; opacity: .62; transform: none !important; filter: saturate(.7); }
 .btn-primary:hover { background: rgba(10,132,255,.78) !important; }
 
 .auth-tab.active,
@@ -216,6 +222,9 @@ input:focus, select:focus, textarea:focus {
 @media (max-width: 760px) {
   .glass-panel { border-radius: 23px !important; }
   .topbar { width: calc(100% - 16px); }
+  main { padding-inline: 12px; }
+  .two-col { grid-template-columns: 1fr !important; }
+  .topbar-user { gap: 8px; font-size: 12px; }
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {

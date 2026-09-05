@@ -1,7 +1,8 @@
 (() => {
   "use strict";
 
-  const API = "https://wassel-backend-ds3n.onrender.com";
+  const API = window.VELTO_API_URL;
+  const money = value => window.VELTO_MONEY ? window.VELTO_MONEY(value, window.VELTO_CURRENCY) : `${Number(value || 0).toFixed(2)} ${window.VELTO_CURRENCY}`;
   const token = () => localStorage.getItem("velto_token") || "";
   const authHeaders = () => token() ? { Authorization: `Bearer ${token()}` } : {};
 
@@ -35,9 +36,9 @@
   };
 
   const meta = {
-    food: { icon: "🍔", title: "Commander à manger", subtitle: "Choisissez vos plats puis faites-vous livrer.", pickup: "Restaurant", pickupPlaceholder: "Ex: Le Comptoir, Tunis" },
-    shop: { icon: "🛍️", title: "Shop", subtitle: "Choisissez vos produits et faites-les livrer.", pickup: "Magasin", pickupPlaceholder: "Ex: Shop Velto, Tunis" },
-    market: { icon: "🛒", title: "Market", subtitle: "Faites vos courses et recevez-les à domicile.", pickup: "Magasin", pickupPlaceholder: "Ex: Marché, Tunis" }
+  food: { icon: "🍔", title: "Commander à manger", subtitle: "Choisissez vos plats puis faites-vous livrer.", pickup: "Restaurant", pickupPlaceholder: "Ex: Central Restaurant" },
+  shop: { icon: "🛍️", title: "Shop", subtitle: "Choisissez vos produits et faites-les livrer.", pickup: "Magasin", pickupPlaceholder: "Ex: Downtown Store" },
+  market: { icon: "🛒", title: "Market", subtitle: "Faites vos courses et recevez-les à domicile.", pickup: "Magasin", pickupPlaceholder: "Ex: City Market" }
   };
 
   function notify(message, good = false) {
@@ -89,7 +90,7 @@
   function productButton(item, icon) {
     return `<button type="button" class="order-card service-product" data-product="${item.id}" style="text-align:left;display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%">
       <span style="display:flex;gap:10px;align-items:center"><span style="font-size:25px">${icon}</span><span><b>${item.name}</b><small style="display:block;opacity:.7">${item.desc}</small></span></span>
-      <strong>${item.price.toFixed(2)} TND</strong>
+      <strong>${money(item.price)}</strong>
     </button>`;
   }
 
@@ -100,6 +101,7 @@
     const menu = menus[category];
     const icon = category === "food" ? "🍔" : category === "shop" ? "🛍️" : "🛒";
     const cart = new Map();
+    const locations = { pickup: null, dropoff: null };
     let payment = "especes";
 
     panel.innerHTML = `<div class="two-col">
@@ -121,14 +123,15 @@
       }
       const total = rows.reduce((sum, row) => sum + row.item.price * row.qty, 0);
       cartEl.innerHTML = rows.map(row => `<div class="order-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
-        <div style="flex:1"><b>${row.item.name}</b><span> × ${row.qty}</span><small style="display:block;opacity:.7">${(row.item.price * row.qty).toFixed(2)} TND</small></div>
+        <div style="flex:1"><b>${row.item.name}</b><span> × ${row.qty}</span><small style="display:block;opacity:.7">${money(row.item.price * row.qty)}</small></div>
         <button type="button" data-minus="${row.item.id}">−</button><button type="button" data-plus="${row.item.id}">+</button>
-      </div>`).join("") + `<div style="display:flex;justify-content:space-between;margin-top:14px"><b>Total produits</b><b>${total.toFixed(2)} TND</b></div>
+      </div>`).join("") + `<div style="display:flex;justify-content:space-between;margin-top:14px"><b>Total produits</b><b>${money(total)}</b></div>
       <form class="catalog-checkout" style="margin-top:16px">
         <label>${info.pickup}<input name="pickup" required maxlength="250" placeholder="${info.pickupPlaceholder}"></label>
-        <label>Adresse de livraison<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label>
+        <button type="button" class="btn-ghost service-use-gps">◎ Utiliser ma position comme retrait</button>
+        <label>Adresse de livraison<input name="dropoff" required maxlength="250" placeholder="Ex: 10 Main Street, City"></label>
         ${paymentButtons(payment)}
-        <button class="btn-primary" type="submit">Commander · ${total.toFixed(2)} TND</button>
+        <button class="btn-primary" type="submit">Commander · ${money(total)}</button>
         <p class="form-error service-error"></p>
       </form>`;
 
@@ -147,6 +150,29 @@
         payment = button.dataset.payment;
         cartEl.querySelectorAll("[data-payment]").forEach(b => b.classList.toggle("active", b === button));
       });
+      const pickupInput = cartEl.querySelector('[name="pickup"]');
+      const dropoffInput = cartEl.querySelector('[name="dropoff"]');
+      pickupInput.oninput = () => { locations.pickup = null; };
+      dropoffInput.oninput = () => { locations.dropoff = null; };
+      cartEl.querySelector(".service-use-gps").onclick = () => {
+        if (!navigator.geolocation) {
+          notify("GPS non disponible.");
+          return;
+        }
+        const gpsButton = cartEl.querySelector(".service-use-gps");
+        gpsButton.disabled = true;
+        gpsButton.textContent = "Localisation…";
+        navigator.geolocation.getCurrentPosition(position => {
+          locations.pickup = { lat: position.coords.latitude, lng: position.coords.longitude };
+          pickupInput.value = `${locations.pickup.lat.toFixed(6)}, ${locations.pickup.lng.toFixed(6)}`;
+          gpsButton.disabled = false;
+          gpsButton.textContent = "✓ Position de retrait ajoutée";
+        }, () => {
+          gpsButton.disabled = false;
+          gpsButton.textContent = "◎ Utiliser ma position comme retrait";
+          notify("Autorisez le GPS pour utiliser votre position.");
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+      };
       cartEl.querySelector(".catalog-checkout").onsubmit = async event => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -159,17 +185,20 @@
           submit.textContent = "Préparation…";
           const pickup = String(data.get("pickup") || "").trim();
           const dropoff = String(data.get("dropoff") || "").trim();
-          const [pickupLocation, dropoffLocation] = await Promise.all([geocode(pickup), geocode(dropoff)]);
+          const pickupLocation = locations.pickup || await geocode(pickup);
+          const dropoffLocation = locations.dropoff || await geocode(dropoff);
           const detail = rows.map(row => `${row.qty}× ${row.item.name}`).join(", ");
           const response = await fetch(`${API}/orders`, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify({ serviceType: category, pickup, dropoff, pkg: `[${category.toUpperCase()}] ${detail}`, paymentMethod: payment, pickupLocation, dropoffLocation })
+            body: JSON.stringify({ serviceType: category, pickup, dropoff, pkg: `[${category.toUpperCase()}] ${detail}`, paymentMethod: payment, pickupLocation, dropoffLocation, itemsTotal: total })
           });
           const result = await readJson(response);
           if (!response.ok) throw new Error(result.error || "Impossible d'envoyer la commande.");
           notify(`Commande ${category} envoyée avec succès`, true);
           cart.clear();
+          locations.pickup = null;
+          locations.dropoff = null;
           render();
           window.__veltoRefreshOrders?.();
         } catch (err) {
@@ -177,7 +206,7 @@
           notify(error.textContent);
         } finally {
           submit.disabled = false;
-          submit.textContent = `Commander · ${total.toFixed(2)} TND`;
+          submit.textContent = `Commander · ${money(total)}`;
         }
       };
     };
@@ -196,14 +225,15 @@
     if (!panel || panel.dataset.serviceReady === "1") return;
     panel.dataset.serviceReady = "1";
     let payment = "especes";
+    const locations = { pickup: null, dropoff: null };
     panel.innerHTML = `<div class="two-col">
       <div class="glass-panel form-panel">
         <div style="font-size:38px">🚕</div><h1>Réserver un Taxi</h1>
         <p class="subtitle">Demandez un chauffeur depuis votre position vers votre destination.</p>
         <form class="taxi-service-form">
-          <label>Point de départ<input name="pickup" required maxlength="250" placeholder="Ex: Avenue Habib Bourguiba, Tunis"></label>
+          <label>Point de départ<input name="pickup" required maxlength="250" placeholder="Ex: 10 Main Street, City"></label>
           <button type="button" class="btn-ghost" data-use-gps>◎ Utiliser ma position</button>
-          <label>Destination<input name="dropoff" required maxlength="250" placeholder="Ex: Lac 2, Tunis"></label>
+          <label>Destination<input name="dropoff" required maxlength="250" placeholder="Ex: 25 Market Road, City"></label>
           <label>Détails<input name="detail" maxlength="250" placeholder="Ex: 2 passagers · bagages optionnels"></label>
           ${paymentButtons(payment)}
           <button class="btn-primary" type="submit">Demander un taxi</button>
@@ -214,8 +244,13 @@
     </div>`;
 
     const form = panel.querySelector(".taxi-service-form");
+    const pickupInput = form.elements.pickup;
+    const dropoffInput = form.elements.dropoff;
+    pickupInput.oninput = () => { locations.pickup = null; };
+    dropoffInput.oninput = () => { locations.dropoff = null; };
     form.querySelector("[data-use-gps]").onclick = () => navigator.geolocation?.getCurrentPosition(position => {
-      form.elements.pickup.value = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+      locations.pickup = { lat: position.coords.latitude, lng: position.coords.longitude };
+      pickupInput.value = `${locations.pickup.lat.toFixed(6)}, ${locations.pickup.lng.toFixed(6)}`;
       notify("Position GPS ajoutée", true);
     }, () => notify("Impossible d'obtenir votre position."));
     form.querySelectorAll("[data-payment]").forEach(button => button.onclick = () => {
@@ -234,7 +269,8 @@
         const pickup = String(data.get("pickup") || "").trim();
         const dropoff = String(data.get("dropoff") || "").trim();
         const detail = String(data.get("detail") || "").trim() || "Taxi";
-        const [pickupLocation, dropoffLocation] = await Promise.all([geocode(pickup), geocode(dropoff)]);
+        const pickupLocation = locations.pickup || await geocode(pickup);
+        const dropoffLocation = locations.dropoff || await geocode(dropoff);
         const response = await fetch(`${API}/orders`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -244,6 +280,8 @@
         if (!response.ok) throw new Error(result.error || "Impossible de demander le taxi.");
         notify("Demande de taxi envoyée", true);
         form.reset();
+        locations.pickup = null;
+        locations.dropoff = null;
         form.querySelector('[data-payment="especes"]').classList.add("active");
         payment = "especes";
         window.__veltoRefreshOrders?.();
@@ -253,9 +291,6 @@
       } finally {
         submit.disabled = false;
         submit.textContent = "Demander un taxi";
-      }
-    };
-  }
       }
     };
   }

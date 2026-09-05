@@ -2,107 +2,118 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Payment = require("../../models/Payment");
 const Order = require("../../models/Order");
+const User = require("../../models/User");
 const { requireAuth, requireRole } = require("../../middleware/auth");
 const { getPaymentProvider, normalizeCurrency, toMinorUnits } = require("./index");
+const { notifyOrderStatus } = require("../notificationService");
 
 const router = express.Router();
-const refundAttempts = new Map();
-const REFUND_WINDOW_MS = 15 * 60 * 1000;
-const REFUND_MAX_ATTEMPTS = 10;
+const methodFor = (value) => value === "especes" || value === "cash" ? "cash" : "card";
+const orderQuery = (id, user) => user.role === "admin" ? { _id: id } : { _id: id, client: user.id };
+const idempotencyKey = (req) => String(req.get("Idempotency-Key") || req.body?.idempotencyKey || "").trim().slice(0, 200) || null;
+const orderPaymentStatus = (status) => status === "captured" ? "paid" : status === "refunded" ? "refunded" : status === "failed" ? "failed" : "pending";
 
-function idempotencyKey(req) { const value = req.get("Idempotency-Key") || req.body?.idempotencyKey || ""; return String(value).trim().slice(0, 200) || null; }
-function refundRateLimit(req, res, next) {
-  const key = `${req.user?.id || "anonymous"}:${req.ip || "unknown"}`;
-  const now = Date.now();
-  const previous = refundAttempts.get(key);
-  if (!previous || now - previous.startedAt >= REFUND_WINDOW_MS) {
-    refundAttempts.set(key, { startedAt: now, count: 1 });
-    return next();
-  }
-  previous.count += 1;
-  if (previous.count > REFUND_MAX_ATTEMPTS) {
-    res.set("Retry-After", String(Math.ceil((REFUND_WINDOW_MS - (now - previous.startedAt)) / 1000)));
-    return res.status(429).json({ error: "Trop de demandes de remboursement. Réessayez plus tard." });
-  }
-  return next();
+async function findPayment(orderId) {
+  return Payment.findOne({ orderId });
 }
-setInterval(() => {
-  const cutoff = Date.now() - REFUND_WINDOW_MS;
-  for (const [key, value] of refundAttempts) if (value.startedAt < cutoff) refundAttempts.delete(key);
-}, REFUND_WINDOW_MS).unref();
 
-// Safe public configuration: never expose a Stripe secret key.
 router.get("/config", (req, res) => {
   const provider = String(process.env.PAYMENT_PROVIDER || "mock").trim().toLowerCase();
-  const stripeConfigured = provider === "stripe" && Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PUBLISHABLE_KEY);
-  res.json({
-    provider,
-    configured: provider !== "stripe" || stripeConfigured,
-    stripePublishableKey: provider === "stripe" ? (process.env.STRIPE_PUBLISHABLE_KEY || null) : null
-  });
+  res.json({ provider, configured: provider !== "stripe" || Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PUBLISHABLE_KEY), stripePublishableKey: provider === "stripe" ? (process.env.STRIPE_PUBLISHABLE_KEY || null) : null });
 });
 
-router.post("/", requireAuth, requireRole("client"), async (req, res) => {
+async function createIntent(req, res) {
   try {
     const orderId = String(req.body.orderId || "").trim();
     if (!mongoose.isValidObjectId(orderId)) return res.status(400).json({ error: "orderId invalide" });
-    const order = await Order.findOne({ _id: orderId, client: req.user.id });
+    const order = await Order.findOne(orderQuery(orderId, req.user));
     if (!order) return res.status(404).json({ error: "Commande introuvable" });
     if (order.status === "annulee") return res.status(409).json({ error: "Commande annulée" });
-    if (order.paymentMethod === "especes") return res.status(400).json({ error: "Cette commande est en paiement espèces" });
+    if (methodFor(order.paymentMethod) !== "card") return res.status(400).json({ error: "Cette commande est en paiement cash" });
     if (order.paymentStatus === "paid") return res.status(409).json({ error: "Commande déjà payée" });
-    const currency = normalizeCurrency(order.currency || process.env.DEFAULT_CURRENCY || "TND");
+    const currency = normalizeCurrency(order.currency);
     const amountMinor = toMinorUnits(order.fee, currency);
     if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) return res.status(400).json({ error: "Montant de paiement invalide" });
-    const key = idempotencyKey(req);
-    let payment = key ? await Payment.findOne({ user: req.user.id, idempotencyKey: key }) : null;
-    if (payment) return res.status(200).json({ payment, order, clientSecret: payment.metadata?.clientSecret || null });
-    payment = await Payment.findOne({ order: order._id });
-    if (payment?.status === "paid") return res.status(409).json({ error: "Commande déjà payée" });
+    const key = idempotencyKey(req) || `order_${order._id}`;
+    let payment = await Payment.findOne({ orderId: order._id }).select("+providerClientSecret");
+    if (payment?.status === "captured") return res.status(409).json({ error: "Commande déjà payée" });
+    if (payment?.providerPaymentId) {
+      return res.json({ payment, order, clientSecret: payment.providerClientSecret || null });
+    }
     const provider = getPaymentProvider();
-    const providerResult = payment?.providerPaymentId
-      ? { provider: payment.provider, providerPaymentId: payment.providerPaymentId, status: payment.status, amountMinor: payment.amountMinor, currency: payment.currency, clientSecret: payment.metadata?.clientSecret || null }
-      : await provider.createPaymentIntent({ amountMinor, currency, orderId: order._id, idempotencyKey: key });
-    const values = { order: order._id, user: req.user.id, method: order.paymentMethod, amount: order.fee, amountMinor, currency, status: providerResult.status === "succeeded" ? "paid" : "pending", provider: providerResult.provider, providerPaymentId: providerResult.providerPaymentId || null, transactionId: providerResult.providerPaymentId || null, ...(key ? { idempotencyKey: key } : {}), metadata: { ...(payment?.metadata || {}), clientSecret: providerResult.clientSecret || null } };
-    if (payment) { Object.assign(payment, values); await payment.save(); } else payment = await Payment.create(values);
-    if (payment.status === "paid") { payment.paidAt = new Date(); await payment.save(); order.paymentStatus = "paid"; } else order.paymentStatus = "pending";
+    const result = await provider.createPaymentIntent({ amountMinor, currency, orderId: order._id, idempotencyKey: key });
+    payment = payment || new Payment({ orderId: order._id, user: order.client });
+    Object.assign(payment, { method: "card", provider: result.provider, providerPaymentId: result.providerPaymentId, amount: order.fee, amountMinor, currency: result.currency.toUpperCase(), status: result.status === "succeeded" ? "captured" : "pending", idempotencyKey: key, providerClientSecret: result.clientSecret || null });
+    await payment.save();
+    order.paymentStatus = orderPaymentStatus(payment.status);
     order.transactionId = payment.providerPaymentId || "";
     await order.save();
-    res.status(payment.status === "paid" ? 200 : 201).json({ payment, order, clientSecret: providerResult.clientSecret || null });
-  } catch (err) { if (err?.code === 11000) return res.status(409).json({ error: "Transaction déjà créée" }); console.error("Create provider payment error:", err); res.status(500).json({ error: "Erreur paiement" }); }
-});
+    return res.status(201).json({ payment, order, clientSecret: result.clientSecret || null });
+  } catch (err) {
+    if (err?.code === 11000) return res.status(409).json({ error: "Transaction déjà créée" });
+    console.error("Create payment intent error:", err);
+    return res.status(500).json({ error: "Erreur paiement" });
+  }
+}
+router.post("/intent", requireAuth, requireRole("client"), createIntent);
+router.post("/", requireAuth, requireRole("client"), createIntent);
 
 router.get("/:orderId", requireAuth, async (req, res) => {
-  try { if (!mongoose.isValidObjectId(req.params.orderId)) return res.status(400).json({ error: "Identifiant de commande invalide" }); const filter = req.user.role === "admin" ? { order: req.params.orderId } : { order: req.params.orderId, user: req.user.id }; const payment = await Payment.findOne(filter); if (!payment) return res.status(404).json({ error: "Transaction introuvable" }); res.json({ payment }); }
-  catch (err) { console.error("Get payment error:", err); res.status(500).json({ error: "Erreur paiement" }); }
+  try {
+    if (!mongoose.isValidObjectId(req.params.orderId)) return res.status(400).json({ error: "Identifiant de commande invalide" });
+    const ownership = req.user.role === "admin"
+      ? { _id: req.params.orderId }
+      : req.user.role === "client"
+        ? { _id: req.params.orderId, client: req.user.id }
+        : { _id: req.params.orderId, livreur: req.user.id };
+    const order = await Order.findOne(ownership).select("_id");
+    if (!order) return res.status(404).json({ error: "Commande introuvable" });
+    const payment = await findPayment(order._id);
+    if (!payment) return res.status(404).json({ error: "Transaction introuvable" });
+    res.json({ payment });
+  } catch (err) { console.error("Get payment error:", err); res.status(500).json({ error: "Erreur paiement" }); }
 });
 
-router.post("/:id/refund", requireAuth, requireRole("admin"), refundRateLimit, async (req, res) => {
+router.post("/:id/cash-collected", requireAuth, requireRole("livreur"), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Identifiant de paiement invalide" });
+    if (req.body.collected !== true) return res.status(400).json({ error: "La collecte cash doit être confirmée explicitement" });
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ error: "Transaction introuvable" });
+    const order = await Order.findOne({ _id: payment.orderId, livreur: req.user.id, status: "route" });
+    if (!order || payment.method !== "cash") return res.status(403).json({ error: "Cette collecte n'est pas autorisée" });
+    payment.status = "captured";
+    payment.cashCollectedAt = new Date();
+    payment.cashCollectedBy = req.user.id;
+    await payment.save();
+    order.paymentStatus = "paid";
+    order.status = "livree";
+    await order.save();
+    await User.findByIdAndUpdate(req.user.id, { $inc: { cashCollectedPending: payment.amount } });
+    await notifyOrderStatus(order, "livree");
+    res.json({ payment, order });
+  } catch (err) { console.error("Cash collection error:", err); res.status(500).json({ error: "Erreur de confirmation cash" }); }
+});
+
+router.post("/:id/refund", requireAuth, requireRole("admin"), async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Identifiant de transaction invalide" });
     const payment = await Payment.findById(req.params.id);
     if (!payment) return res.status(404).json({ error: "Transaction introuvable" });
-    if (payment.status !== "paid") return res.status(409).json({ error: "Seule une transaction payée peut être remboursée" });
-    if (!payment.providerPaymentId) return res.status(409).json({ error: "Cette transaction n'a pas de paiement fournisseur" });
+    if (payment.status !== "captured") return res.status(409).json({ error: "Seule une transaction capturée peut être remboursée" });
+    const reason = String(req.body.reasonCode || req.body.reason || "").trim().slice(0, 80);
+    if (!reason) return res.status(400).json({ error: "reasonCode est requis" });
+    if (payment.method === "cash") return res.status(409).json({ error: "Les remboursements cash nécessitent une réconciliation manuelle" });
     const provider = getPaymentProvider(payment.provider);
-    const requestedAmount = req.body.amount != null ? Number(req.body.amount) : payment.amount;
-    const amountMinor = toMinorUnits(requestedAmount, payment.currency);
-    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0 || amountMinor > payment.amountMinor) return res.status(400).json({ error: "Montant de remboursement invalide" });
-    const alreadyRefundedMinor = Number(payment.metadata?.refundedAmountMinor || 0);
-    if (alreadyRefundedMinor + amountMinor > payment.amountMinor) return res.status(409).json({ error: "Le montant cumulé des remboursements dépasse le paiement" });
-    const result = await provider.refundPayment({ providerPaymentId: payment.providerPaymentId, amountMinor, idempotencyKey: idempotencyKey(req) || `refund_${payment._id}_${alreadyRefundedMinor + amountMinor}` });
-    payment.providerRefundId = result.providerRefundId || payment.providerRefundId;
-    const totalRefundedMinor = alreadyRefundedMinor + amountMinor;
-    payment.metadata = { ...(payment.metadata || {}), refundStatus: result.status || "unknown", lastRefundAmountMinor: amountMinor, refundedAmountMinor: totalRefundedMinor };
-    if ((result.status === "succeeded" || result.status === "refunded") && totalRefundedMinor >= payment.amountMinor) { payment.status = "refunded"; payment.refundedAt = new Date(); await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "refunded", transactionId: payment.providerPaymentId || "" } }); }
+    const amountMinor = toMinorUnits(req.body.amount == null ? payment.amount : Number(req.body.amount), payment.currency);
+    const result = await provider.refundPayment({ providerPaymentId: payment.providerPaymentId, amountMinor, idempotencyKey: idempotencyKey(req) || `refund_${payment._id}` });
+    if (result.status === "succeeded" || result.status === "refunded") payment.status = "refunded";
+    payment.providerRefundId = result.providerRefundId || null;
+    payment.failureReason = reason;
     await payment.save();
+    await Order.findByIdAndUpdate(payment.orderId, { $set: { paymentStatus: payment.status === "refunded" ? "refunded" : "paid", transactionId: payment.providerPaymentId || "" } });
     res.json({ payment, refund: result });
   } catch (err) { console.error("Refund payment error:", err); res.status(500).json({ error: "Erreur remboursement" }); }
-});
-
-router.post("/:id/fail", requireAuth, requireRole("client"), async (req, res) => {
-  try { const payment = await Payment.findOne({ _id: req.params.id, user: req.user.id }); if (!payment) return res.status(404).json({ error: "Transaction introuvable" }); if (payment.status !== "pending") return res.status(409).json({ error: "Transaction déjà traitée" }); payment.status = "failed"; payment.metadata = { ...(payment.metadata || {}), reason: String(req.body?.reason || "payment_failed").trim().slice(0, 200) }; await payment.save(); await Order.findByIdAndUpdate(payment.order, { $set: { paymentStatus: "failed", transactionId: payment.providerPaymentId || "" } }); res.json({ payment }); }
-  catch (err) { console.error("Fail payment error:", err); res.status(500).json({ error: "Erreur paiement" }); }
 });
 
 module.exports = router;
